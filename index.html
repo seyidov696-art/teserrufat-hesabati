@@ -503,7 +503,7 @@ function shell(pg) {
       <div class="brand"><div class="brand-ic">${sv(ICON.sprout, 22).replace('currentColor', '#fff')}</div><b>${esc(DB.farmName || 'Təsərrüfatım')}</b></div>
       ${cloudBadge()}
       ${nav}<div class="sp"></div>
-      <button type="button" class="nav" data-a="logout">${sv(ICON.out, 18)} Çıxış</button>
+      ${cloudOn() ? '' : `<button type="button" class="nav" data-a="logout">${sv(ICON.out, 18)} Çıxış</button>`}
     </nav>
     <main class="main" id="main">
       <div class="print-only" style="margin-bottom:10px"><b>${esc(DB.farmName)}</b> · Çap tarixi: ${fmtD(todayStr())}</div>
@@ -1215,7 +1215,9 @@ function cloudSettingsCard() {
   if (cloudOn()) return `<div class="card" style="margin-bottom:16px"><div class="card-h"><h3>☁️ Bulud və telefon</h3></div><div class="pad" style="display:flex;flex-direction:column;gap:10px">
     <div class="kv"><span>Hesab</span><b>${esc(c.email || '')}</b></div><div class="kv"><span>Vəziyyət</span>${cloudBadge().replace('id="cloudSt"', '')}</div>
     <div style="line-height:1.5">Telefonda açmaq üçün bu linki telefonun brauzerində açın və <b>“Ana ekrana əlavə et”</b> seçin. Eyni e-poçt və şifrə ilə daxil olun:<br><b style="word-break:break-all">${esc(APP_URL)}</b></div>
-    <div class="row"><button type="button" class="btn pri" data-a="cloudSyncNow">İndi sinxronlaşdır</button><button type="button" class="btn" data-a="copyAppUrl">Linki kopyala</button></div></div></div>`;
+    <div class="row"><button type="button" class="btn pri" data-a="cloudSyncNow">İndi sinxronlaşdır</button><button type="button" class="btn" data-a="copyAppUrl">Linki kopyala</button></div>
+    <div class="hint" style="margin-top:6px">Proqramı bağlamaq üçün sadəcə pəncərəni bağlayın — hesabdan çıxmaq lazım deyil. "Hesabdan çıx" yalnız başqa adam bu cihazda işləyəcəksə lazımdır.</div>
+    <div class="row"><button type="button" class="btn danger" data-a="logout">Hesabdan çıx</button></div></div></div>`;
   return `<div class="card" style="margin-bottom:16px"><div class="card-h"><h3>☁️ Telefonla birlikdə işlət</h3></div><div class="pad" style="display:flex;flex-direction:column;gap:10px">
     <div style="line-height:1.5">İndi məlumatlar yalnız bu cihazdadır. Bulud hesabı açsanız, kompüterdə yazdığınız telefonda da görünəcək və cihaz xarab olsa belə məlumat itməyəcək.</div>
     <div class="row"><button type="button" class="btn pri" data-a="cloudConnect">Bulud hesabı aç / qoş</button></div></div></div>`;
@@ -1461,7 +1463,7 @@ A.personText = ds => {
 /* ---------- ☁️ Bulud sinxronizasiyası (Supabase) ---------- */
 const SB_URL = 'https://ljimehorotzyeebcugau.supabase.co', SB_KEY = 'sb_publishable_RLqhJaq_o3Nd3_gIN8QqGg_HPG_zPUX', APP_URL = 'https://seyidov696-art.github.io/teserrufat-hesabati/';
 const CLOUD_KEY = 'tsh_cloud_v1', BASE_KEY = 'tsh_base_v1';
-const CLOUD = { sb: null, user: null, state: 'idle', last: '', busy: false, again: false, timer: null };
+const CLOUD = { sb: null, user: null, state: 'idle', last: '', busy: false, again: false, timer: null, rt: null };
 const cloudReady = () => !!(window.supabase && /^https?:\/\//.test(SB_URL));
 function cloudInfo() { try { return JSON.parse(localStorage.getItem(CLOUD_KEY) || 'null'); } catch (e) { return null; } }
 function setCloudInfo(v) { if (v) localStorage.setItem(CLOUD_KEY, JSON.stringify(v)); else localStorage.removeItem(CLOUD_KEY); }
@@ -1475,7 +1477,8 @@ function cloudInit() {
   });
   window.addEventListener('online', () => cloudSync());
   document.addEventListener('visibilitychange', () => { if (!document.hidden) cloudSync(); });
-  setInterval(() => { if (!document.hidden) cloudSync(); }, 45000);
+  setInterval(() => { if (!document.hidden) cloudSync(); }, 15000);
+  window.addEventListener('focus', () => cloudSync());
   if (cloudOn()) setTimeout(cloudSync, 400);
 }
 // --- 3 tərəfli birləşdirmə: base (son sinxron), local (bu cihaz), remote (bulud) ---
@@ -1528,6 +1531,7 @@ async function cloudSync() {
     const { data: sd } = await CLOUD.sb.auth.getSession();
     if (!sd || !sd.session) { setStatus('auth'); return; }
     const uid = sd.session.user.id;
+    cloudRealtime(uid);
     for (let i = 0; i < 4; i++) {
       const { data: row, error } = await CLOUD.sb.from('tsh_docs').select('data,rev').eq('user_id', uid).maybeSingle();
       if (error) throw error;
@@ -1563,6 +1567,14 @@ async function cloudSync() {
   }
 }
 A.cloudSyncNow = () => cloudSync();
+function cloudRealtime(uid) {
+  if (CLOUD.rt || !CLOUD.sb || Date.now() - (CLOUD.rtFail || 0) < 60000) return;
+  try {
+    CLOUD.rt = CLOUD.sb.channel('tsh-' + uid)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tsh_docs', filter: 'user_id=eq.' + uid }, () => { clearTimeout(CLOUD.rtT); CLOUD.rtT = setTimeout(cloudSync, 300); })
+      .subscribe(st => { if ((st === 'CHANNEL_ERROR' || st === 'TIMED_OUT') && CLOUD.rt) { const ch = CLOUD.rt; CLOUD.rt = null; CLOUD.rtFail = Date.now(); setTimeout(() => { try { CLOUD.sb.removeChannel(ch); } catch (e) {} }, 0); } });
+  } catch (e) { CLOUD.rt = null; }
+}
 const cloudErr = e => {
   const m = String((e && e.message) || e || '');
   if (/Invalid login/i.test(m)) return 'E-poçt və ya şifrə səhvdir.';
@@ -1643,7 +1655,7 @@ async function cloudLogout() {
   if (localStorage.getItem('tsh_dirty')) { await cloudSync(); }
   const dirty = !!localStorage.getItem('tsh_dirty');
   confirmBox(dirty ? '<b>Diqqət:</b> son dəyişikliklər hələ buluda göndərilməyib (internet yoxdur). Çıxsanız, onlar itəcək. Yenə də çıxılsın?' : 'Hesabdan çıxılsın? Məlumatlarınız buludda qalır, yenidən daxil olanda geri gələcək. Bu cihazdan isə silinəcək.', async () => {
-    try { await CLOUD.sb.auth.signOut(); } catch (e) {}
+    try { if (CLOUD.rt) CLOUD.sb.removeChannel(CLOUD.rt); CLOUD.rt = null; await CLOUD.sb.auth.signOut(); } catch (e) {}
     setCloudInfo({ uid: '', email: (cloudInfo() || {}).email || '' });
     localStorage.removeItem(KEY); localStorage.removeItem(BASE_KEY); localStorage.removeItem('tsh_dirty');
     load(); render();
