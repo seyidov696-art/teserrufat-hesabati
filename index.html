@@ -1458,20 +1458,20 @@ function resolvePerson(d) {
   return { id: '', name: '' };
 }
 function personLedger(pid) {
-  const ev = [];
+  const ev = [], seq = id => String(id || '').slice(0, 8);
   DB.sales.filter(s => s.personId === pid).forEach(s => {
     const t = num(s.total);
-    ev.push({ date: s.date, ord: 1, desc: `Satış: ${itemName(s.itemId)} ${fmtQ(s.qty, itemUnit(s.itemId))} × ${fmt(s.price)}${s.note ? ' · ' + s.note : ''}`, tag: PAYTYPES[s.pay], sale: t, recv: 0, buy: 0, paid: 0 });
-    if (s.pay !== 'nisye') ev.push({ date: s.date, ord: 2, desc: `Ödəniş alındı (${PAYTYPES[s.pay]})`, sale: 0, recv: t, buy: 0, paid: 0 });
+    const atSale = s.pay === 'nisye' ? sum(DB.spays.filter(p => p.saleId === s.id && p.initial), p => num(p.amount)) : t;
+    ev.push({ date: s.date, seq: seq(s.id), kind: 'sale', desc: `${itemName(s.itemId)} ${fmtQ(s.qty, itemUnit(s.itemId))} × ${fmt(s.price)}${s.note ? ' · ' + s.note : ''}`, tag: PAYTYPES[s.pay], sale: t, recv: r2(atSale), buy: 0, paid: 0, left: r2(t - atSale) });
   });
-  DB.spays.forEach(p => { const s = byId('sales', p.saleId); if (!s || s.personId !== pid) return; ev.push({ date: p.date, ord: 3, desc: (p.initial ? 'Ödəniş alındı (satış zamanı)' : 'Ödəniş alındı') + (p.note ? ' · ' + p.note : ''), sale: 0, recv: num(p.amount), buy: 0, paid: 0 }); });
+  DB.spays.forEach(p => { if (p.initial) return; const s = byId('sales', p.saleId); if (!s || s.personId !== pid) return; ev.push({ date: p.date, seq: seq(p.id), kind: 'recv', desc: 'Ödəniş alındı' + (p.note ? ' · ' + p.note : ''), sale: 0, recv: num(p.amount), buy: 0, paid: 0, left: null }); });
   DB.expenses.filter(e => e.personId === pid).forEach(e => {
     const t = num(e.amount);
-    ev.push({ date: e.date, ord: 1, desc: `Alış: ${e.note || e.cat}`, tag: PAYTYPES[e.pay || 'nagd'], sale: 0, recv: 0, buy: t, paid: 0 });
-    if (e.pay !== 'nisye') ev.push({ date: e.date, ord: 2, desc: `Ödəniş etdik (${PAYTYPES[e.pay || 'nagd']})`, sale: 0, recv: 0, buy: 0, paid: t });
+    const atBuy = e.pay === 'nisye' ? sum(DB.ppays.filter(p => p.expId === e.id && p.initial), p => num(p.amount)) : t;
+    ev.push({ date: e.date, seq: seq(e.id), kind: 'buy', desc: `Alış: ${e.note || e.cat}`, tag: PAYTYPES[e.pay || 'nagd'], sale: 0, recv: 0, buy: t, paid: r2(atBuy), left: r2(-(t - atBuy)) });
   });
-  DB.ppays.forEach(p => { const e = byId('expenses', p.expId); if (!e || e.personId !== pid) return; ev.push({ date: p.date, ord: 3, desc: (p.initial ? 'Ödəniş etdik (alış zamanı)' : 'Ödəniş etdik') + (p.note ? ' · ' + p.note : ''), sale: 0, recv: 0, buy: 0, paid: num(p.amount) }); });
-  ev.sort((a, b) => a.date.localeCompare(b.date) || a.ord - b.ord);
+  DB.ppays.forEach(p => { if (p.initial) return; const e = byId('expenses', p.expId); if (!e || e.personId !== pid) return; ev.push({ date: p.date, seq: seq(p.id), kind: 'paid', desc: 'Ödəniş etdik' + (p.note ? ' · ' + p.note : ''), sale: 0, recv: 0, buy: 0, paid: num(p.amount), left: null }); });
+  ev.sort((a, b) => a.date.localeCompare(b.date) || a.seq.localeCompare(b.seq));
   let bal = 0; ev.forEach(x => { bal = r2(bal + x.sale - x.recv - x.buy + x.paid); x.bal = bal; });
   return ev;
 }
@@ -1522,6 +1522,8 @@ function personStatement(p) {
 function pagePerson() {
   const p = person(VIEW.p.id); if (!p) { VIEW.page = 'persons'; return pagePersons(); }
   const T = personTotals(p.id), S = personStatement(p), per = VIEW.p.per || 'all';
+  const hasBuy = T.buy > 0.004 || T.paid > 0.004, nc = hasBuy ? 7 : 5;
+  const leftCell = x => x.left === null ? '<td></td>' : `<td class="n ${x.left > 0.004 ? 'pos' : x.left < -0.004 ? 'neg' : ''}">${Math.abs(x.left) > 0.004 ? fmt(Math.abs(x.left)) : '—'}</td>`;
   const chips = [['all', 'Hamısı'], ['month', 'Bu ay'], ['year', 'Bu il'], ['custom', 'Tarix seç']].map(([k, t]) => `<button type="button" class="btn sm${per === k ? ' pri' : ''}" data-a="perSet" data-v="${k}">${t}</button>`).join('');
   return {
     title: esc(p.name), navId: 'persons', sub: 'Şəxsin hesabı (akt-sverka)',
@@ -1539,13 +1541,13 @@ function pagePerson() {
       <div class="grid g4">
         <div class="card pad stat"><div class="l">Satdığımız · ${esc(S.label)}</div><div class="v">${fmt(S.sale)}</div></div>
         <div class="card pad stat"><div class="l">Ondan aldığımız ödəniş</div><div class="v pos">${fmt(S.recv)}</div></div>
-        <div class="card pad stat"><div class="l">Ondan aldığımız mal</div><div class="v">${fmt(S.buy)}</div></div>
+        ${hasBuy ? `<div class="card pad stat"><div class="l">Ondan aldığımız mal</div><div class="v">${fmt(S.buy)}</div></div>` : `<div class="card pad stat"><div class="l">Nisyə qalığı (satışlardan)</div><div class="v neg">${fmt(T.owesUs)}</div></div>`}
         <div class="card pad stat dark"><div class="l">Dövrün sonuna qalıq</div><div class="v" style="font-size:20px">${balText(S.close)}</div></div></div>
       <div class="card" style="margin-top:16px"><div class="card-h"><h3>Əməliyyatlar · ${esc(S.label)}</h3></div>
-      ${S.ev.length || S.R ? `<div class="tw"><table><thead><tr><th>Tarix</th><th>Əməliyyat</th><th class="n">Satış</th><th class="n">Ödəniş aldıq</th><th class="n">Alış</th><th class="n">Ödəniş etdik</th><th class="n">Qalıq</th></tr></thead><tbody>
-        ${S.R && S.R.from ? `<tr><td>${fmtD(S.R.from)}</td><td><i>Dövrün əvvəlinə qalıq</i></td><td></td><td></td><td></td><td></td><td class="n ${balCls(S.open)}"><b>${fmt(S.open)}</b></td></tr>` : ''}
-        ${S.ev.map(x => `<tr><td>${fmtD(x.date)}</td><td>${esc(x.desc)}${x.tag ? ` <span class="tag${x.tag === 'Nisyə' ? ' debt' : ''}">${esc(x.tag)}</span>` : ''}</td><td class="n">${x.sale ? fmt(x.sale) : ''}</td><td class="n pos">${x.recv ? fmt(x.recv) : ''}</td><td class="n">${x.buy ? fmt(x.buy) : ''}</td><td class="n neg">${x.paid ? fmt(x.paid) : ''}</td><td class="n ${balCls(x.bal)}"><b>${fmt(x.bal)}</b></td></tr>`).join('')}
-      </tbody><tfoot><tr><td colspan="2">Cəmi</td><td class="n">${fmt(S.sale)}</td><td class="n">${fmt(S.recv)}</td><td class="n">${fmt(S.buy)}</td><td class="n">${fmt(S.paid)}</td><td class="n"><b>${fmt(S.close)}</b></td></tr></tfoot></table></div>
+      ${S.ev.length || S.R ? `<div class="tw"><table><thead><tr><th>Tarix</th><th>Əməliyyat</th><th class="n">Satış</th><th class="n">Ödəniş aldıq</th>${hasBuy ? '<th class="n">Alış</th><th class="n">Ödəniş etdik</th>' : ''}<th class="n">Bu əməliyyatdan qalan</th><th class="n">Ümumi qalıq</th></tr></thead><tbody>
+        ${S.R && S.R.from ? `<tr><td>${fmtD(S.R.from)}</td><td colspan="${nc - 1}"><i>Dövrün əvvəlinə qalıq</i></td><td class="n ${balCls(S.open)}"><b>${fmt(S.open)}</b></td></tr>` : ''}
+        ${S.ev.map(x => `<tr${x.left === null ? ' style="background:var(--line2)"' : ''}><td>${fmtD(x.date)}</td><td>${x.kind === 'sale' ? 'Satış: ' : ''}${esc(x.desc)}${x.tag ? ` <span class="tag${x.tag === 'Nisyə' ? ' debt' : ''}">${esc(x.tag)}</span>` : ''}</td><td class="n">${x.sale ? fmt(x.sale) : ''}</td><td class="n pos">${x.recv ? fmt(x.recv) : ''}</td>${hasBuy ? `<td class="n">${x.buy ? fmt(x.buy) : ''}</td><td class="n neg">${x.paid ? fmt(x.paid) : ''}</td>` : ''}${leftCell(x)}<td class="n ${balCls(x.bal)}"><b>${fmt(x.bal)}</b></td></tr>`).join('')}
+      </tbody><tfoot><tr><td colspan="2">Cəmi</td><td class="n">${fmt(S.sale)}</td><td class="n">${fmt(S.recv)}</td>${hasBuy ? `<td class="n">${fmt(S.buy)}</td><td class="n">${fmt(S.paid)}</td>` : ''}<td></td><td class="n"><b>${fmt(S.close)}</b></td></tr></tfoot></table></div>
       <div class="pad" style="font-size:15px"><b class="${balCls(S.close)}">${balText(S.close)}</b><div class="hint" style="margin-top:4px">Qalıq: müsbət — şəxs sizə borcludur; mənfi — siz ona borclusunuz.</div></div>` : '<div class="empty">Bu şəxslə hələ əməliyyat yoxdur</div>'}</div>
       <div class="print-only"><div style="margin-top:40px;display:flex;justify-content:space-between;gap:30px"><div>${esc(DB.farmName || 'Təsərrüfat')}: ____________________</div><div>${esc(p.name)}: ____________________</div></div></div>`
   };
@@ -1586,7 +1588,9 @@ A.personText = ds => {
   const p = person(ds.id), S = personStatement(p);
   const L = [`*${DB.farmName || 'Təsərrüfat'}* — hesab üzləşməsi`, `Şəxs: ${p.name}`, `Dövr: ${S.label}`, ''];
   if (S.R && S.R.from) L.push(`Dövrün əvvəlinə qalıq: ${fmt(S.open)}`);
-  S.ev.forEach(x => L.push(`• ${fmtD(x.date)} — ${x.desc}${x.tag ? ' (' + x.tag + ')' : ''}: ${x.sale ? '+' + fmt(x.sale) : x.recv ? '−' + fmt(x.recv) : x.buy ? 'alış ' + fmt(x.buy) : 'ödədik ' + fmt(x.paid)}`));
+  S.ev.forEach(x => L.push(x.kind === 'sale' ? `• ${fmtD(x.date)} — ${x.desc} (${x.tag}): satış ${fmt(x.sale)}, ödəniş ${fmt(x.recv)}, qalıb ${fmt(x.left)}`
+    : x.kind === 'buy' ? `• ${fmtD(x.date)} — ${x.desc} (${x.tag}): alış ${fmt(x.buy)}, ödədik ${fmt(x.paid)}, qalıb ${fmt(-x.left)}`
+    : x.kind === 'recv' ? `• ${fmtD(x.date)} — Ödəniş alındı: ${fmt(x.recv)}` : `• ${fmtD(x.date)} — Ödəniş etdik: ${fmt(x.paid)}`));
   L.push('', `Satış: ${fmt(S.sale)}`, `Ödəniş alındı: ${fmt(S.recv)}`); if (S.buy || S.paid) L.push(`Alış: ${fmt(S.buy)}`, `Ödəniş etdik: ${fmt(S.paid)}`);
   L.push(`*${balText(S.close)}*`);
   const txt = L.join('\n');
