@@ -157,6 +157,21 @@ tfoot td{font-weight:800;border-top:2px solid var(--line)}
   .bnav button.on{color:var(--green)}
 }
 @media print{.bnav,.inst{display:none !important}}
+.fbar{display:flex;flex-direction:column;gap:10px;margin-bottom:16px}
+.chips{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex:0 0 auto;height:36px;padding:0 14px;border-radius:999px;border:1px solid #CFCABB;background:#fff;font-size:14px;font-weight:600;color:var(--ink);cursor:pointer;white-space:nowrap}
+.chip.on{background:var(--green);border-color:var(--green);color:#fff}
+.cloud-st{white-space:nowrap;align-self:center}
+@media (max-width: 860px){
+  .side{flex-wrap:nowrap;align-items:center}
+  .side .brand{padding:0;width:auto;flex:1;min-width:0}
+  .side .brand b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .fbar select{flex:1 1 45%}
+  .grid.g4{grid-template-columns:1fr 1fr}
+  .grid.g4 .stat .v{font-size:20px}
+}
+
 
 .cloud-st{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:transparent;border-radius:999px;padding:5px 11px;font:inherit;font-size:12.5px;color:var(--muted);cursor:pointer;margin:2px 0 10px 4px;align-self:flex-start}
 @media (max-width: 860px){
@@ -997,17 +1012,66 @@ A.newWPay = ds => wpayForm(ds && ds.worker);
 A.del_wpay = ds => confirmBox('Bu ödəniş silinsin?', () => { DB.wpays = DB.wpays.filter(x => x.id !== ds.id); });
 
 /* ---------- Satış ---------- */
+/* ---------- süzgəclər (satış / xərc) ---------- */
+function periodOf(def) {
+  const per = VIEW.p.per || def, t = todayStr(), d = new Date(t);
+  if (per === 'today') return { R: { from: t, to: t }, label: 'Bu gün' };
+  if (per === 'week') { const w = (d.getDay() + 6) % 7; const m = new Date(d); m.setDate(d.getDate() - w); return { R: { from: m.toISOString().slice(0, 10), to: t }, label: 'Bu həftə' }; }
+  if (per === 'month') return { R: { from: t.slice(0, 7) + '-01', to: t.slice(0, 7) + '-31' }, label: monthLabel() };
+  if (per === 'year') return { R: { from: t.slice(0, 4) + '-01-01', to: t.slice(0, 4) + '-12-31' }, label: t.slice(0, 4) + '-ci il' };
+  if (per === 'custom') return { R: { from: VIEW.p.pfrom || '', to: VIEW.p.pto || '' }, label: `${VIEW.p.pfrom ? fmtD(VIEW.p.pfrom) : '…'} – ${VIEW.p.pto ? fmtD(VIEW.p.pto) : '…'}` };
+  return { R: null, label: 'Bütün dövr' };
+}
+const chip = (k, v, t, cur) => `<button type="button" class="chip${cur === v ? ' on' : ''}" data-a="fSet" data-k="${k}" data-v="${v}">${t}</button>`;
+A.fSet = ds => { VIEW.p[ds.k] = ds.v; render(); };
+function filterBar(o) {
+  const per = VIEW.p.per || o.defPer, fmod = VIEW.p.fmod || '';
+  const mods = MODULES.filter(m => m.id !== 'material' && (o.modUsed || []).includes(m.id));
+  const selS = 'height:40px;border-radius:10px;border:1px solid #CFCABB;padding:0 10px;background:#fff;max-width:100%';
+  return `<div class="fbar no-print">
+    ${o.mod ? '' : `<div class="chips">${chip('fmod', '', 'Hamısı', fmod)}${mods.map(m => chip('fmod', m.id, m.name, fmod)).join('')}</div>`}
+    <div class="chips">${[['today', 'Bu gün'], ['week', 'Bu həftə'], ['month', 'Bu ay'], ['year', 'Bu il'], ['all', 'Hamısı'], ['custom', 'Tarix seç']].map(([v, t]) => chip('per', v, t, per)).join('')}</div>
+    ${per === 'custom' ? `<div class="row" style="gap:8px"><input type="date" data-change="f:pfrom" value="${esc(VIEW.p.pfrom || '')}" style="${selS}"><input type="date" data-change="f:pto" value="${esc(VIEW.p.pto || '')}" style="${selS}"></div>` : ''}
+    <div class="row" style="gap:8px;flex-wrap:wrap">${o.extra || ''}<input type="search" data-change="f:q" value="${esc(VIEW.p.q || '')}" placeholder="${o.qph}" style="${selS};flex:1;min-width:160px"></div>
+  </div>`;
+}
 function pageSales(mod) {
-  const list = DB.sales.filter(s => !mod || (item(s.itemId) || {}).module === mod).sort((a, b) => b.date.localeCompare(a.date));
-  const inc = DB.incomes.filter(i => !mod || i.module === mod).sort((a, b) => b.date.localeCompare(a.date));
-  const html = `<div class="card"><div class="card-h"><h3>Satışlar</h3></div>${list.length ? `<div class="tw"><table><thead><tr><th>Tarix</th><th>Məhsul</th><th>Haradan</th><th>Sahə</th><th>Alıcı</th><th class="n">Miqdar</th><th class="n">Qiymət</th><th class="n">Cəmi</th><th>Ödəniş</th><th></th></tr></thead><tbody>
+  const fmod = mod || VIEW.p.fmod || '', { R, label } = periodOf('month'), q = normName(VIEW.p.q || '');
+  const all = DB.sales.filter(s => (!fmod || (item(s.itemId) || {}).module === fmod));
+  let list = all.filter(s => inRange(s.date, R) && (!VIEW.p.fitem || s.itemId === VIEW.p.fitem) && (!VIEW.p.fpay || s.pay === VIEW.p.fpay) && (!q || normName(saleBuyer(s) + ' ' + (s.note || '') + ' ' + itemName(s.itemId)).includes(q)));
+  const srt = VIEW.p.sort || 'dd';
+  list.sort((a, b) => srt === 'da' ? a.date.localeCompare(b.date) : srt === 'ad' ? num(b.total) - num(a.total) : srt === 'aa' ? num(a.total) - num(b.total) : srt === 'bu' ? saleBuyer(a).localeCompare(saleBuyer(b), 'az') : b.date.localeCompare(a.date));
+  const inc = DB.incomes.filter(i => (!fmod || i.module === fmod) && inRange(i.date, R)).sort((a, b) => b.date.localeCompare(a.date));
+  const usedItems = [...new Set(all.map(s => s.itemId))].map(id => ({ v: id, t: itemName(id) })).sort((a, b) => a.t.localeCompare(b.t, 'az'));
+  const selS = 'height:40px;border-radius:10px;border:1px solid #CFCABB;padding:0 10px;background:#fff';
+  const extra = `<select data-change="f:fitem" style="${selS}">${opts(usedItems, VIEW.p.fitem || '', 'Bütün məhsullar')}</select>
+    <select data-change="f:fpay" style="${selS}">${opts(Object.entries(PAYTYPES).map(([v, t]) => ({ v, t })), VIEW.p.fpay || '', 'Bütün ödənişlər')}</select>
+    <select data-change="f:sort" style="${selS}">${opts([{ v: 'dd', t: 'Yeni → köhnə' }, { v: 'da', t: 'Köhnə → yeni' }, { v: 'ad', t: 'Məbləğ: çox → az' }, { v: 'aa', t: 'Məbləğ: az → çox' }, { v: 'bu', t: 'Alıcıya görə' }], srt)}</select>`;
+  const modUsed = [...new Set(DB.sales.map(s => (item(s.itemId) || {}).module))];
+  // bölgü: bölmə → məhsul
+  const grp = {};
+  list.forEach(s => { const it = item(s.itemId) || {}, m = it.module || 'taxil'; grp[m] = grp[m] || { n: 0, t: 0, items: {} }; grp[m].n++; grp[m].t = r2(grp[m].t + num(s.total)); const g = grp[m].items[s.itemId] = grp[m].items[s.itemId] || { n: 0, q: 0, t: 0 }; g.n++; g.q = r2(g.q + num(s.qty)); g.t = r2(g.t + num(s.total)); });
+  const total = sum(list, s => num(s.total)), paid = sum(list, salePaid), debt = sum(list, saleDebt);
+  const breakdown = list.length ? `<div class="card" style="margin-top:16px"><div class="card-h"><h3>Bölgü · ${esc(label)}</h3></div><div class="tw"><table><thead><tr><th>Bölmə / məhsul</th><th class="n">Satış sayı</th><th class="n">Miqdar</th><th class="n">Məbləğ</th><th class="n">Pay</th></tr></thead><tbody>
+    ${Object.entries(grp).sort((a, b) => b[1].t - a[1].t).map(([m, g]) => `<tr style="background:var(--line2)"><td><b>${esc(modName(m))}</b></td><td class="n"><b>${g.n}</b></td><td></td><td class="n"><b>${fmt(g.t)}</b></td><td class="n">${total ? Math.round(g.t / total * 100) : 0}%</td></tr>
+      ${Object.entries(g.items).sort((a, b) => b[1].t - a[1].t).map(([id, x]) => `<tr><td style="padding-left:24px">${esc(itemName(id))}</td><td class="n">${x.n}</td><td class="n">${fmtQ(x.q, itemUnit(id))}</td><td class="n">${fmt(x.t)}</td><td class="n">${total ? Math.round(x.t / total * 100) : 0}%</td></tr>`).join('')}`).join('')}
+    </tbody></table></div></div>` : '';
+  const html = `${filterBar({ mod, defPer: 'month', modUsed, extra, qph: 'Axtar: alıcı, məhsul, qeyd' })}
+    <div class="print-only" style="margin-bottom:8px">Dövr: ${esc(label)}${fmod ? ' · ' + esc(modName(fmod)) : ''}</div>
+    <div class="grid g4">
+      <div class="card pad stat"><div class="l">Satış sayı · ${esc(label)}</div><div class="v">${list.length}</div></div>
+      <div class="card pad stat dark"><div class="l">Ümumi məbləğ</div><div class="v">${fmt(total)}</div></div>
+      <div class="card pad stat"><div class="l">Alınan pul</div><div class="v pos">${fmt(paid)}</div></div>
+      <div class="card pad stat"><div class="l">Nisyə qalığı</div><div class="v neg">${fmt(debt)}</div></div></div>
+    ${breakdown}
+    <div class="card" style="margin-top:16px"><div class="card-h"><h3>Satışlar (${list.length})</h3></div>${list.length ? `<div class="tw"><table><thead><tr><th>Tarix</th><th>Məhsul</th><th>Haradan</th><th>Sahə</th><th>Alıcı</th><th class="n">Miqdar</th><th class="n">Qiymət</th><th class="n">Cəmi</th><th>Ödəniş</th><th></th></tr></thead><tbody>
     ${list.map(s => { const debt = saleDebt(s); return `<tr><td>${fmtD(s.date)}</td><td>${esc(itemName(s.itemId))}</td><td>${s.from === 'anbar' ? 'Anbardan' : 'Sahədən'}</td><td>${s.fieldId ? esc(fieldName(s.fieldId)) : '—'}</td><td>${saleBuyer(s) ? `<a href="#" data-a="go" data-p="person" data-id="${s.personId}">${esc(saleBuyer(s))}</a>` : '—'}</td><td class="n">${fmtQ(s.qty, itemUnit(s.itemId))}</td><td class="n">${fmt(s.price)}</td><td class="n"><b>${fmt(s.total)}</b></td><td>${s.pay === 'nisye' ? (debt > 0 ? `<span class="tag debt">Nisyə · borc ${fmt(debt)}</span>` : '<span class="tag paid">Nisyə · ödənib</span>') : PAYTYPES[s.pay]}</td>${rowActs('sale', s.id)}</tr>`; }).join('')}
-    </tbody><tfoot><tr><td colspan="7">Cəmi</td><td class="n">${fmt(sum(list, s => num(s.total)))}</td><td colspan="2"></td></tr></tfoot></table></div>` : '<div class="empty">Satış yoxdur</div>'}</div>
-    <div class="card" style="margin-top:16px"><div class="card-h"><h3>Digər gəlirlər</h3><button type="button" class="btn sm no-print" data-a="newIncome" data-module="${mod || ''}">+ Digər gəlir</button></div>${inc.length ? `<div class="tw"><table><thead><tr><th>Tarix</th><th>Növ</th><th>Bölmə</th><th>Sahə</th><th>Qeyd</th><th class="n">Məbləğ</th><th></th></tr></thead><tbody>
+    </tbody><tfoot><tr><td colspan="7">Cəmi</td><td class="n">${fmt(total)}</td><td colspan="2"></td></tr></tfoot></table></div>` : '<div class="empty">Seçilən süzgəcə uyğun satış yoxdur</div>'}</div>
+    <div class="card" style="margin-top:16px"><div class="card-h"><h3>Digər gəlirlər · ${esc(label)}</h3><button type="button" class="btn sm no-print" data-a="newIncome" data-module="${mod || ''}">+ Digər gəlir</button></div>${inc.length ? `<div class="tw"><table><thead><tr><th>Tarix</th><th>Növ</th><th>Bölmə</th><th>Sahə</th><th>Qeyd</th><th class="n">Məbləğ</th><th></th></tr></thead><tbody>
     ${inc.map(i => `<tr><td>${fmtD(i.date)}</td><td>${esc(i.cat)}</td><td>${modName(i.module)}</td><td>${esc(fieldName(i.fieldId))}</td><td>${esc(i.note)}</td><td class="n"><b>${fmt(i.amount)}</b></td>${rowActs('income', i.id)}</tr>`).join('')}
     </tbody></table></div>` : '<div class="empty">Subsidiya, xidmət və s. gəlirlər burada</div>'}</div>`;
   if (mod) return html;
-  return { title: 'Satış', sub: 'Bütün satışlar və gəlirlər', actions: `<button type="button" class="btn" data-a="newIncome">+ Digər gəlir</button><button type="button" class="btn pri" data-a="newSale">+ Yeni satış</button>`, body: html };
+  return { title: 'Satış', sub: 'Bölməyə, məhsula, dövrə görə seçin', actions: `<button type="button" class="btn" data-a="print">🖨 Çap / PDF</button><button type="button" class="btn" data-a="newIncome">+ Digər gəlir</button><button type="button" class="btn pri" data-a="newSale">+ Yeni satış</button>`, body: html };
 }
 function saleForm(s, pre) {
   pre = pre || {};
@@ -1083,20 +1147,29 @@ A.del_income = ds => confirmBox('Bu gəlir silinsin?', () => { DB.incomes = DB.i
 
 /* ---------- Xərclər ---------- */
 function pageExpenses(mod) {
-  const m = VIEW.p.month === 'all' ? '' : (VIEW.p.month || (mod ? '' : todayStr().slice(0, 7)));
-  const R = m ? { from: m + '-01', to: m + '-31' } : null;
-  const lines = costLines(R).filter(l => !mod || l.module === mod).sort((a, b) => b.date.localeCompare(a.date));
-  const months = [...new Set([todayStr().slice(0, 7), ...costLines().map(l => l.date.slice(0, 7))])].sort().reverse();
-  const byCat = {}; lines.forEach(l => byCat[l.cat] = r2((byCat[l.cat] || 0) + l.amount));
-  const tbl = `<div class="tw"><table><thead><tr><th>Tarix</th><th>Kateqoriya</th><th>Sahə</th><th>Bölmə</th><th>Qeyd</th><th class="n">Məbləğ</th><th></th></tr></thead><tbody>
+  const fmod = mod || VIEW.p.fmod || '', { R, label } = periodOf('month'), q = normName(VIEW.p.q || '');
+  const allL = costLines();
+  let lines = allL.filter(l => (!fmod || l.module === fmod) && inRange(l.date, R) && (!VIEW.p.fcat || l.cat === VIEW.p.fcat) && (!q || normName(l.cat + ' ' + (l.note || '') + ' ' + fieldName(l.fieldId)).includes(q)));
+  const srt = VIEW.p.sort || 'dd';
+  lines.sort((a, b) => srt === 'da' ? a.date.localeCompare(b.date) : srt === 'ad' ? b.amount - a.amount : srt === 'aa' ? a.amount - b.amount : b.date.localeCompare(a.date));
+  const cats = [...new Set(allL.map(l => l.cat))].sort((a, b) => a.localeCompare(b, 'az')).map(c => ({ v: c, t: c }));
+  const selS = 'height:40px;border-radius:10px;border:1px solid #CFCABB;padding:0 10px;background:#fff';
+  const extra = `<select data-change="f:fcat" style="${selS}">${opts(cats, VIEW.p.fcat || '', 'Bütün kateqoriyalar')}</select>
+    <select data-change="f:sort" style="${selS}">${opts([{ v: 'dd', t: 'Yeni → köhnə' }, { v: 'da', t: 'Köhnə → yeni' }, { v: 'ad', t: 'Məbləğ: çox → az' }, { v: 'aa', t: 'Məbləğ: az → çox' }], srt)}</select>`;
+  const modUsed = [...new Set(allL.map(l => l.module))];
+  const total = sum(lines, l => l.amount);
+  const byCat = {}, byMod = {}; lines.forEach(l => { byCat[l.cat] = r2((byCat[l.cat] || 0) + l.amount); byMod[l.module] = r2((byMod[l.module] || 0) + l.amount); });
+  const rows = o => Object.entries(o).sort((a, b) => b[1] - a[1]).map(([c, v]) => `<tr><td>${esc(c)}</td><td class="n"><b>${fmt(v)}</b></td><td class="n">${total ? Math.round(v / total * 100) : 0}%</td></tr>`).join('') || '<tr><td class="empty">—</td></tr>';
+  const html = `${filterBar({ mod, defPer: 'month', modUsed, extra, qph: 'Axtar: qeyd, kateqoriya, sahə' })}
+    <div class="print-only" style="margin-bottom:8px">Dövr: ${esc(label)}${fmod ? ' · ' + esc(modName(fmod)) : ''}</div>
+    <div class="grid g2"><div class="card pad stat" style="background:#A23B32;border-color:#A23B32;color:#fff"><div class="l" style="color:#fff">${esc(label)} · cəmi xərc (${lines.length} qeyd)</div><div class="v">${fmt(total)}</div></div>
+    <div class="card"><div class="card-h"><h3>Kateqoriyalar üzrə</h3></div><div class="tw"><table><tbody>${rows(byCat)}</tbody></table></div></div></div>
+    ${!mod && Object.keys(byMod).length > 1 ? `<div class="card" style="margin-top:16px"><div class="card-h"><h3>Bölmələr üzrə</h3></div><div class="tw"><table><tbody>${rows(Object.fromEntries(Object.entries(byMod).map(([k, v]) => [modName(k), v])))}</tbody></table></div></div>` : ''}
+    <div class="card" style="margin-top:16px"><div class="card-h"><h3>Xərc qeydləri (${lines.length})</h3>${mod ? `<button type="button" class="btn sm no-print" data-a="newExpense" data-module="${mod}">+ Xərc</button>` : ''}</div>${lines.length ? `<div class="tw"><table><thead><tr><th>Tarix</th><th>Kateqoriya</th><th>Sahə</th><th>Bölmə</th><th>Qeyd</th><th class="n">Məbləğ</th><th></th></tr></thead><tbody>
     ${lines.map(l => `<tr><td>${fmtD(l.date)}</td><td>${esc(l.cat)}</td><td>${esc(fieldName(l.fieldId))}</td><td>${modName(l.module)}</td><td>${esc(l.note)}${l.kind !== 'expense' ? ` <span class="tag">${esc(l.src)}</span>` : ''}</td><td class="n"><b>${fmt(l.amount)}</b></td>${l.kind === 'expense' ? rowActs('expense', l.ref) : '<td class="acts" style="font-size:12.5px;color:var(--muted)">' + esc(l.src) + ' bölməsindən</td>'}</tr>`).join('')}
-    </tbody><tfoot><tr><td colspan="5">Cəmi</td><td class="n">${fmt(sum(lines, l => l.amount))}</td><td></td></tr></tfoot></table></div>`;
-  const html = `<div class="row no-print" style="margin-bottom:14px"><label for="monthSel" style="font-weight:600">Ay:</label><select id="monthSel" data-change="month" style="height:40px;border-radius:10px;border:1px solid #CFCABB;padding:0 10px">${opts([{ v: 'all', t: 'Hamısı' }, ...months.map(x => ({ v: x, t: monthLabel(x + '-01') }))], m || 'all')}</select></div>
-    <div class="grid g2"><div class="card pad stat" style="background:#A23B32;border-color:#A23B32;color:#fff"><div class="l" style="color:#fff">${m ? monthLabel(m + '-01') : 'Bütün dövr'} · cəmi xərc</div><div class="v">${fmt(sum(lines, l => l.amount))}</div></div>
-    <div class="card"><div class="tw"><table><tbody>${Object.entries(byCat).sort((a, b) => b[1] - a[1]).map(([c, v]) => `<tr><td>${esc(c)}</td><td class="n"><b>${fmt(v)}</b></td></tr>`).join('') || '<tr><td class="empty">—</td></tr>'}</tbody></table></div></div></div>
-    <div class="card" style="margin-top:16px"><div class="card-h"><h3>Xərc qeydləri</h3>${mod ? `<button type="button" class="btn sm no-print" data-a="newExpense" data-module="${mod}">+ Xərc</button>` : ''}</div>${lines.length ? tbl : '<div class="empty">Bu dövrdə xərc yoxdur</div>'}</div>`;
+    </tbody><tfoot><tr><td colspan="5">Cəmi</td><td class="n">${fmt(total)}</td><td></td></tr></tfoot></table></div>` : '<div class="empty">Seçilən süzgəcə uyğun xərc yoxdur</div>'}</div>`;
   if (mod) return html;
-  return { title: 'Xərclər', sub: 'Texnika və işçi xərcləri də buraya avtomatik düşür', actions: `<button type="button" class="btn pri" data-a="newExpense">+ Xərc əlavə et</button>`, body: html };
+  return { title: 'Xərclər', sub: 'Texnika və işçi xərcləri də buraya avtomatik düşür', actions: `<button type="button" class="btn" data-a="print">🖨 Çap / PDF</button><button type="button" class="btn pri" data-a="newExpense">+ Xərc əlavə et</button>`, body: html };
 }
 function expenseForm(e, pre) {
   pre = pre || {};
@@ -1538,7 +1611,7 @@ function cloudInit() {
   });
   window.addEventListener('online', () => cloudSync());
   document.addEventListener('visibilitychange', () => { if (!document.hidden) cloudSync(); });
-  setInterval(() => { if (!document.hidden) cloudSync(); }, 15000);
+  setInterval(() => { if (!document.hidden) cloudSync(); }, 30000);
   window.addEventListener('focus', () => cloudSync());
   if (cloudOn()) setTimeout(cloudSync, 400);
 }
@@ -1576,13 +1649,13 @@ function merge3(b, l, r) {
 }
 const hasUserData = d => d && ['fields', 'sales', 'expenses', 'moves', 'harvests', 'workers', 'machines', 'incomes', 'persons'].some(k => Array.isArray(d[k]) && d[k].length);
 function getBase() { try { return JSON.parse(localStorage.getItem(BASE_KEY) || 'null'); } catch (e) { return null; } }
-function setStatus(s) { CLOUD.state = s; const el = document.getElementById('cloudSt'); if (el) el.outerHTML = cloudBadge(); }
+function setStatus(s) { if (s === 'sync' || CLOUD.state === s) { if (s !== 'sync') CLOUD.state = s; return; } CLOUD.state = s; const el = document.getElementById('cloudSt'); if (el) el.outerHTML = cloudBadge(); }
 function cloudBadge() {
   if (!cloudOn()) return `<span id="cloudSt"></span>`;
-  const t = { idle: ['☁️', 'Bulud'], sync: ['⏳', 'Sinxronlaşır…'], ok: ['✅', 'Sinxron' + (CLOUD.last ? ' · ' + CLOUD.last : '')], off: ['📴', 'İnternet yoxdur — sonra göndəriləcək'], err: ['⚠️', 'Sinxron xətası'], auth: ['🔑', 'Yenidən daxil olun'] }[CLOUD.state] || ['☁️', ''];
+  const t = { idle: ['✅', 'Sinxron'], sync: ['✅', 'Sinxron'], ok: ['✅', 'Sinxron'], off: ['📴', 'İnternetsiz'], err: ['⚠️', 'Sinxron xətası'], auth: ['🔑', 'Yenidən daxil olun'] }[CLOUD.state] || ['☁️', ''];
   return `<button type="button" id="cloudSt" class="cloud-st no-print" data-a="${CLOUD.state === 'auth' ? 'cloudRelogin' : 'cloudSyncNow'}" title="Sinxronlaşdır">${t[0]} ${esc(t[1])}</button>`;
 }
-function scheduleSync() { if (!cloudOn()) return; localStorage.setItem('tsh_dirty', '1'); clearTimeout(CLOUD.timer); CLOUD.timer = setTimeout(cloudSync, 1500); }
+function scheduleSync() { if (!cloudOn()) return; localStorage.setItem('tsh_dirty', '1'); clearTimeout(CLOUD.timer); CLOUD.timer = setTimeout(cloudSync, 200); }
 async function cloudSync() {
   if (!cloudOn() || !CLOUD.sb) return;
   if (CLOUD.busy) { CLOUD.again = true; return; }
@@ -1627,7 +1700,7 @@ async function cloudSync() {
     if (CLOUD.again) { CLOUD.again = false; setTimeout(cloudSync, 300); }
   }
 }
-A.cloudSyncNow = () => cloudSync();
+A.cloudSyncNow = async () => { await cloudSync(); toast(CLOUD.state === 'ok' ? 'Sinxronlaşdırıldı' : CLOUD.state === 'off' ? 'İnternet yoxdur' : 'Sinxron alınmadı'); };
 function cloudRealtime(uid) {
   if (CLOUD.rt || !CLOUD.sb || Date.now() - (CLOUD.rtFail || 0) < 60000) return;
   try {
@@ -1768,6 +1841,7 @@ document.addEventListener('change', e => {
   if (k === 'rfrom' || k === 'rto') { VIEW.p.preset = 'custom'; VIEW.p[k === 'rfrom' ? 'from' : 'to'] = el.value; render(); }
   if (k === 'restore' && el.files[0]) { restoreFrom(el.files[0]); el.value = ''; }
   if (k === 'pq') { VIEW.p.q = el.value; render(); }
+  if (k.startsWith('f:')) { const f = k.slice(2); VIEW.p[f] = el.value; if (f === 'pfrom' || f === 'pto') VIEW.p.per = 'custom'; render(); }
   if (k === 'pfrom' || k === 'pto') { VIEW.p.per = 'custom'; VIEW.p[k] = el.value; render(); }
 });
 document.addEventListener('submit', e => {
