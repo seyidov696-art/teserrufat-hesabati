@@ -156,6 +156,25 @@ tfoot td{font-weight:800;border-top:2px solid var(--line)}
   .bnav button{flex:1;border:0;background:none;display:flex;flex-direction:column;align-items:center;gap:3px;font-size:11px;font-weight:600;color:var(--muted);padding:4px 0;cursor:pointer}
   .bnav button.on{color:var(--green)}
 }
+
+.vfab{position:fixed;right:22px;bottom:22px;z-index:35;width:60px;height:60px;border-radius:50%;border:0;background:var(--green);color:#fff;font-size:26px;box-shadow:0 6px 18px rgba(0,0,0,.25);cursor:pointer}
+.voice{display:flex;flex-direction:column;align-items:center;gap:12px}
+.vmic{width:88px;height:88px;border-radius:50%;border:0;background:var(--green-l);font-size:40px;cursor:pointer;transition:.2s}
+.vmic.on{background:#C0392B;color:#fff;animation:vpulse 1.2s infinite}
+@keyframes vpulse{0%{box-shadow:0 0 0 0 rgba(192,57,43,.5)}70%{box-shadow:0 0 0 18px rgba(192,57,43,0)}100%{box-shadow:0 0 0 0 rgba(192,57,43,0)}}
+.vst{font-size:14px;color:var(--muted);text-align:center}
+.voice textarea{width:100%;font:inherit;font-size:16px;padding:10px 12px;border-radius:12px;border:1px solid #CFCABB;resize:vertical}
+.voice details{width:100%;font-size:14px}.voice summary{cursor:pointer;color:var(--green);font-weight:600}
+.vex{margin:8px 0 0;padding-left:18px;display:flex;flex-direction:column;gap:6px;font-size:14px;color:var(--ink)}
+.vbanner{background:var(--green-l);border:1px solid #BFD9C5;border-radius:12px;padding:10px 12px;margin-bottom:12px;font-size:14px;line-height:1.45}
+@media (max-width: 860px){.vfab{bottom:calc(78px + env(safe-area-inset-bottom));right:16px;width:56px;height:56px}}
+
+.qrow{display:flex;gap:6px}.qrow input{flex:1;min-width:0}.qrow .usel{flex:0 0 auto;width:auto;min-width:92px}
+.qconv{color:var(--green);font-weight:600;min-height:0}
+.vout{width:100%;background:var(--green-l);border-radius:12px;padding:10px 12px;font-size:15px;line-height:1.45}.vout:empty{display:none}
+.drafts{display:flex;flex-direction:column;gap:12px}.dsum{font-size:16px;font-weight:600;line-height:1.4}
+.ufix{display:flex;flex-direction:column;gap:8px;max-height:380px;overflow:auto}.ufrow{align-items:flex-start;gap:10px;line-height:1.4}
+@media (min-width: 861px){.vfab{display:none}}
 @media print{.bnav,.inst{display:none !important}}
 html{touch-action:manipulation;-webkit-text-size-adjust:100%}
 @media (max-width: 860px){
@@ -321,7 +340,7 @@ function defaults() {
       season: ''
     },
     fields: [], items: [], moves: [], harvests: [], sales: [], spays: [], incomes: [],
-    expenses: [], machines: [], jobs: [], workers: [], accruals: [], wpays: [], persons: [], ppays: []
+    expenses: [], machines: [], jobs: [], workers: [], accruals: [], wpays: [], persons: [], ppays: [], drafts: []
   };
 }
 function seedItems(d) {
@@ -375,7 +394,7 @@ function costLines(R) {
 }
 function incomeLines(R) {
   const L = [];
-  DB.sales.forEach(s => { const it = item(s.itemId); L.push({ date: s.date, amount: num(s.total), fieldId: s.fieldId || '', module: it ? it.module : 'taxil', note: (it ? it.name : '') + ' ' + fmtQ(s.qty, it ? it.unit : ''), src: 'Satış', ref: s.id, kind: 'sale' }); });
+  DB.sales.forEach(s => { const it = item(s.itemId); L.push({ date: s.date, amount: num(s.total), fieldId: s.fieldId || '', module: it ? it.module : 'taxil', note: (it ? it.name : '') + ' ' + saleQtyTxt(s), src: 'Satış', ref: s.id, kind: 'sale' }); });
   DB.incomes.forEach(i => L.push({ date: i.date, amount: num(i.amount), fieldId: i.fieldId || '', module: i.module || 'taxil', note: (i.cat || '') + (i.note ? ' · ' + i.note : ''), src: 'Gəlir', ref: i.id, kind: 'income' }));
   return L.filter(l => inRange(l.date, R));
 }
@@ -439,16 +458,19 @@ function openModal(title, body, onSave, o) {
   form.addEventListener('submit', e => {
     e.preventDefault();
     const data = Object.fromEntries(new FormData(form).entries());
+    unitNormalize(form, data);
     form.querySelectorAll('input[type=checkbox]').forEach(c => { data[c.name] = c.checked; });
     let res;
     try { res = onSave(data, form); } catch (err) { console.error(err); res = 'Xəta baş verdi: ' + err.message; }
     if (typeof res === 'string') { ov.querySelector('#merr').textContent = res; return; }
-    if (res !== false) { closeModal(); save(); render(); if (o.okMsg !== '') toast(o.okMsg || 'Yadda saxlanıldı'); }
+    if (res !== false) { if (VOICE_DRAFT) { DB.drafts = (DB.drafts || []).filter(x => x.id !== VOICE_DRAFT); VOICE_DRAFT = null; } closeModal(); save(); render(); if (o.okMsg !== '') toast(o.okMsg || 'Yadda saxlanıldı'); }
   });
+  if (form.querySelector('select[data-qunit]')) { form.addEventListener('input', () => unitSync(form)); form.addEventListener('change', () => unitSync(form)); unitSync(form); }
   if (o.onInput) { form.addEventListener('input', () => o.onInput(form)); form.addEventListener('change', () => o.onInput(form)); o.onInput(form); }
   const first = form.querySelector('input:not([type=hidden]),select,textarea'); if (first) first.focus();
 }
-function closeModal() { const m = document.getElementById('modal'); if (m) m.remove(); MODAL = null; }
+let VOICE_DRAFT = null;
+function closeModal() { VOICE_DRAFT = null; try { if (typeof REC !== 'undefined' && REC) { REC.stop(); REC = null; } } catch (e) {} const m = document.getElementById('modal'); if (m) m.remove(); MODAL = null; }
 function confirmBox(text, onYes, yesLabel) {
   openModal('Təsdiq', `<p style="margin:0;font-size:15.5px;line-height:1.5">${text}</p>`, () => { onYes(); }, { saveLabel: yesLabel || 'Bəli, sil', okMsg: 'Edildi' });
 }
@@ -565,9 +587,274 @@ function shell(pg) {
       <div class="print-only" style="margin-bottom:10px"><b>${esc(DB.farmName)}</b> · Çap tarixi: ${fmtD(todayStr())}</div>
       <div class="top"><div><div class="sub">${pg.sub || ''}</div><h1>${pg.title}</h1></div><div class="row no-print">${pg.actions || ''}</div></div>
       ${installBanner()}${pg.body}
-    </main>${bottomBar(pg)}</div>`;
+    </main>${bottomBar(pg)}${isPhone() ? '<button type="button" class="vfab no-print" data-a="voice" aria-label="Səsli qeyd">🎤</button>' : ''}</div>`;
 }
 A.logout = () => { if (cloudOn()) return cloudLogout(); sessionStorage.removeItem(SESSION_KEY); render(); };
+/* ---------- 🎤 Səsli əmr (sadə qaydalarla başa düşmə) ---------- */
+const VN = s => String(s || '').toLocaleLowerCase('az').replace(/(\d)[.,](\d)/g, '$1\u0001$2').replace(/[.,!?;:"«»()]/g, ' ').replace(/\u0001/g, '.').replace(/\s+/g, ' ').trim();
+const NUMW = { sıfır: 0, bir: 1, iki: 2, üç: 3, dörd: 4, beş: 5, altı: 6, yeddi: 7, səkkiz: 8, doqquz: 9, on: 10, iyirmi: 20, otuz: 30, qırx: 40, əlli: 50, altmış: 60, yetmiş: 70, səksən: 80, doxsan: 90 };
+function wordsToNums(t) {
+  // "iki min beş yüz" → 2500, "yarım" → 0.5, "bir yarım" → 1.5
+  const w = t.split(' '), out = []; let cur = null, total = 0, any = false;
+  const flush = () => { if (any) { out.push(String(total + (cur || 0))); } cur = null; total = 0; any = false; };
+  for (const x of w) {
+    const b = x.replace(/(dan|dən|tan|tən|a|ə|ya|yə)$/, '');
+    if (NUMW[x] !== undefined || NUMW[b] !== undefined) { const v = NUMW[x] !== undefined ? NUMW[x] : NUMW[b]; cur = (cur || 0) + v; any = true; if (NUMW[x] === undefined) { out.push(String(total + cur) + x.slice(b.length)); cur = null; total = 0; any = false; } continue; }
+    if (x === 'yüz' || /^yüz/.test(x)) { cur = (cur || 1) * 100; any = true; if (x !== 'yüz') { out.push(String(total + cur) + x.slice(3)); cur = null; total = 0; any = false; } continue; }
+    if (x === 'min' || /^min(dən|ə)$/.test(x)) { total += (cur || 1) * 1000; cur = 0; any = true; if (x !== 'min') { out.push(String(total) + x.slice(3)); cur = null; total = 0; any = false; } continue; }
+    if (x === 'yarım') { if (any) { cur = (cur || 0) + 0.5; } else { out.push('0.5'); } continue; }
+    flush(); out.push(x);
+  }
+  flush();
+  return out.join(' ').replace(/(\d)\s*[,]\s*(\d)/g, '$1.$2').replace(/(\d) (\d{3})\b/g, '$1$2');
+}
+const stem = s => VN(s).replace(/[^a-zəğıöüçş0-9 ]/g, '').slice(0, 4);
+function findPerson(t) {
+  const words = t.split(' ');
+  let best = null, score = 0;
+  DB.persons.forEach(p => {
+    const pw = VN(p.name).split(' ').filter(Boolean); if (!pw.length) return;
+    let sc = 0;
+    pw.forEach((w, i) => { const st = w.slice(0, Math.max(3, Math.min(w.length, 5))); if (words.some(x => x.startsWith(st))) sc += i === 0 ? 2 : 1; });
+    if (sc > score) { score = sc; best = p; }
+  });
+  return score >= 2 ? best : null;
+}
+function guessNewName(t) {
+  // "əli məmmədova satdım" → ad: söz + yönlük şəkilçi, "əlidən aldım"
+  const m = t.match(/(?:^|\s)([a-zəğıöüçş]{3,})(?:\s([a-zəğıöüçş]{3,}))?(?:ya|yə|a|ə|dan|dən|nan|nən)?\s(?:\d|satd|satt|sat|ver|ald|borc)/);
+  if (!m) return '';
+  const skip = /^(bu|gün|dünən|bugün|anbar|anbardan|sahə|sahədən|nağd|nisyə|cəmi|qiymət|tonu|kilosu|litri|manat|ton|kq|kilo|litr|qalan|qalanı|pul|ödəniş|xərc|buğda|arpa)/;
+  const parts = [m[1], m[2]].filter(x => x && !skip.test(x)).map(x => x.replace(/(ya|yə|dan|dən|nan|nən)$/, '').replace(/(ova|yeva|eva|ov|yev|ev)a$/, '$1').replace(/^(.)/, c => c.toLocaleUpperCase('az')));
+  return parts.join(' ');
+}
+function findItem(t) {
+  let best = null, len = 0;
+  DB.items.forEach(it => { const n = VN(it.name).split(' ')[0]; const st = n.slice(0, Math.max(3, Math.min(n.length, 5))); if (st && t.split(' ').some(w => w.startsWith(st)) && st.length > len) { best = it; len = st.length; } });
+  return best;
+}
+const UNITRX = '(ton|tonn|t|kq|kg|kilo|kiloqram|qram|litr|l|ədəd|eded|kisə|kisa|sentner|baş)';
+function findQty(t) {
+  const m = t.match(new RegExp('(\\d+(?:\\.\\d+)?)\\s*' + UNITRX + '[a-zəğıöüçş]*'));
+  if (!m) return null;
+  let u = m[2]; u = /^(ton|tonn|t)$/.test(u) ? 't' : /^(kq|kg|kilo|kiloqram)$/.test(u) ? 'kq' : /^(litr|l)$/.test(u) ? 'l' : /^qram$/.test(u) ? 'q' : /^sentner$/.test(u) ? 'sentner' : u;
+  return { v: num(m[1]), u, raw: m[0] };
+}
+function convQty(q, unit) {
+  if (!q) return 0; const iu = VN(unit || '');
+  if (q.u === 't' && /^kq|^kg/.test(iu)) return q.v * 1000;
+  if (q.u === 'kq' && /^t/.test(iu)) return q.v / 1000;
+  if (q.u === 'sentner' && /^t/.test(iu)) return q.v / 10;
+  if (q.u === 'sentner' && /^kq/.test(iu)) return q.v * 100;
+  return q.v;
+}
+function findMoney(t, skipRaw) {
+  const s = skipRaw ? t.replace(skipRaw, ' ') : t;
+  const r = { unit: null, total: null, paid: null };
+  let m;
+  if ((m = s.match(/(\d+(?:\.\d+)?)\s*(?:manat|azn|₼)?\s*(?:dan|dən|manatdan|manatdən|-dan)\b/)) || (m = s.match(/(?:tonu|kilosu|litri|ədədi|kisəsi|qiyməti|biri|hərəsi|başı)\s*(\d+(?:\.\d+)?)/)) || (m = s.match(/(\d+(?:\.\d+)?)\s*manatdan/))) r.unit = num(m[1]);
+  if ((m = s.match(/(?:cəmi|hamısı|ümumi|toplam)\s*(\d+(?:\.\d+)?)/)) || (m = s.match(/(\d+(?:\.\d+)?)\s*manata\b/))) r.total = num(m[1]);
+  if ((m = s.match(/(\d+(?:\.\d+)?)\s*(?:manat|azn|₼)?\s*(?:nağd\s*)?(?:verdi|ödədi|aldım|aldıq|ödəniş|ilkin|beh|qabaqcadan)/)) || (m = s.match(/(?:verdi|ödədi|aldım)\s*(\d+(?:\.\d+)?)/))) r.paid = num(m[1]);
+  return r;
+}
+function payType(t) { return /nisy|borca|borcuna|sonra verəcək|sonra ödəyəcək|qalanı/.test(t) ? 'nisye' : /köçürm|kartla|karta|kartdan|bank/.test(t) ? 'kocurme' : 'nagd'; }
+function dateOf(t) { const d = new Date(todayStr()); if (/srağagün|sırağagün/.test(t)) d.setDate(d.getDate() - 2); else if (/dünən/.test(t)) d.setDate(d.getDate() - 1); return d.toISOString().slice(0, 10); }
+function expCat(t) {
+  const map = [[/dizel|yanacaq|benzin|solyarka|soliyarka/, 'Yanacaq'], [/gübrə|selitra|karbamid/, 'Gübrə'], [/toxum/, 'Toxum'], [/dərman|pestisid|herbisid/, 'Dərman (pestisid)'], [/təmir|ehtiyat hissə|zapças/, 'Təmir'], [/maaş|işçi|fəhlə|gündəlik/, 'İşçi'], [/su|suvarma/, 'Su / suvarma'], [/işıq|elektrik/, 'Elektrik'], [/daşı|maşın kirayə|yük/, 'Daşınma'], [/yem|saman|arpa yem/, 'Yem'], [/baytar|peyvənd/, 'Baytar'], [/icarə|kirayə/, 'Texnika icarəsi']];
+  for (const [rx, c] of map) if (rx.test(t)) return DB.settings.expenseCats.includes(c) ? c : DB.settings.expenseCats.find(x => VN(x).startsWith(VN(c).slice(0, 4))) || 'Digər';
+  return 'Digər';
+}
+function parseCommand(raw) {
+  const t0 = VN(raw), t = wordsToNums(t0).replace(/(\d+(?:\.\d+)?)\s*qəpik(dən|ə|a)?/g, (m, a, sf) => (num(a) / 100) + ' manat' + (sf ? (sf === 'dən' ? 'dan' : sf) : ''));
+  const p = findPerson(t), it = findItem(t), q = findQty(t), mon = findMoney(t, q && q.raw);
+  const r = { raw, t, person: p, newName: p ? '' : guessNewName(t), item: it, qty: q, date: dateOf(t) };
+  const sale = /sat(d|t)ı|satış|satdıq|sattıq|sataca|satıram|satdı/.test(t);
+  const buy = /(^|\s)ald(ı|i)m|aldıq|alış|alındı|gətirdim|mədaxil|girdi|anbara/.test(t);
+  const recv = /ödəniş al|pul al|borcunu|ödədi|qaytardı|pul verdi|verdi(?!\s*\d)/.test(t) && !q;
+  const payOut = /ödədim|borcumu|pulunu verdim|ona verdim/.test(t) && !q && p;
+  const exp = (/xərc|xərclədim|maaş|təmir/.test(t) && !q) || (/yanacaq|dizel|benzin|ödədim/.test(t) && !it && !q) || (/yanacaq|dizel|benzin/.test(t) && !q && !sale);
+  if (sale && (it || q)) r.kind = 'sale';
+  else if (recv && p) r.kind = 'recv';
+  else if (payOut) r.kind = 'payout';
+  else if (buy && (it || q) && !exp) r.kind = 'buy';
+  else if (exp || (/manat/.test(t) && !it && !p)) r.kind = 'expense';
+  else if (it && q) r.kind = 'sale';
+  else r.kind = '';
+  const n = t.match(/(\d+(?:\.\d+)?)/g) || [];
+  if (r.kind === 'sale' || r.kind === 'buy') {
+    const base = it ? it.unit : '', qU = q ? (ufam(ukey(base)) && ufam(ukey(base))[q.u] ? q.u : ukey(base)) : ukey(base);
+    r.qtyIn = q ? q.v : 0; r.qtyU = qU;
+    const pu = /kilosu|kiloqramı/.test(t) ? 'kq' : /tonu|tonun/.test(t) ? 't' : /sentneri/.test(t) ? 'sentner' : qU;
+    const fam = ufam(qU);
+    let pIn = mon.unit ? (fam && fam[pu] && fam[qU] ? mon.unit * fam[qU] / fam[pu] : mon.unit) : 0;
+    if (!pIn && mon.total && r.qtyIn) pIn = mon.total / r.qtyIn;
+    if (!pIn && !mon.total) { const left = (t.match(/(\d+(?:\.\d+)?)/g) || []).map(Number).filter(v => v !== r.qtyIn && v !== mon.paid); if (left.length) pIn = left[0]; }
+    r.priceIn = pIn ? Math.round(pIn * 10000) / 10000 : '';
+    const qty = it ? convQty(q, it.unit) : (q ? q.v : 0);
+    let price = mon.unit, total = mon.total;
+    if (price && q && qty && Math.abs(q.v - qty) > 1e-9) price = r2(price * q.v / qty); // "kilosu 0.5" → ton qiyməti
+    if (!price && total && qty) price = r2(total / qty);
+    if (!price && !total) { const left = n.map(Number).filter(v => v !== (q && q.v) && v !== mon.paid); if (left.length) { const v = left[0]; if (qty && v > qty * 2 && !/dan|dən/.test(t)) { total = v; price = r2(v / qty); } else price = v; } }
+    r.qtyN = qty; r.price = price || ''; r.total = r.qtyIn && r.priceIn ? r2(r.qtyIn * r.priceIn) : (qty && price ? r2(qty * price) : total || 0);
+    r.pay = payType(t); r.paid = mon.paid || 0;
+    if (r.paid && r.total && r.paid < r.total - 0.004) r.pay = 'nisye';
+  }
+  if (r.kind === 'expense' || r.kind === '') r.newName = '';
+  if (r.kind === 'expense') { const vals = (t.match(/(\d+(?:\.\d+)?)\s*(?:manat|azn|₼)/) || t.match(/(\d+(?:\.\d+)?)/) || [])[1]; r.amount = num(vals || 0); r.cat = expCat(t); }
+  if (r.kind === 'recv' || r.kind === 'payout') r.amount = num((t.match(/(\d+(?:\.\d+)?)/) || [])[1] || 0);
+  return r;
+}
+function setField(form, name, v) {
+  const el = form.querySelector(`[name="${name}"]`); if (!el || v === undefined || v === null || v === '') return;
+  el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true }));
+}
+function voiceBanner(form, raw, warn) {
+  const mb = form.querySelector('.mb'); if (!mb) return;
+  const d = document.createElement('div'); d.className = 'vbanner';
+  d.innerHTML = `<b>🎤 Səslə dolduruldu:</b> «${esc(raw)}»<div>${warn ? esc(warn) + ' ' : ''}Yoxlayın, lazımsa düzəldin və <b>Yadda saxla</b> basın.</div>`;
+  mb.prepend(d);
+}
+function applyPerson(form, r) {
+  if (r.person) setField(form, 'personId', r.person.id);
+  else if (r.newName) { setField(form, 'personId', '__new'); setField(form, 'newName', r.newName); }
+}
+function runCommand(raw, draftId) {
+  const r = parseCommand(raw);
+  if (!r.kind) return openModal('Başa düşmədim', `<div class="steps"><p style="margin:0">«${esc(raw)}»</p><p class="warn-p">Nə etmək istədiyinizi tapa bilmədim. Belə deyin:</p>${VOICE_EXAMPLES}</div>`, null, { extraBtn: `<button type="button" class="btn pri" data-a="voice" style="margin-right:auto">🎤 Yenidən de</button>` });
+  if (r.kind === 'sale') {
+    saleForm(null, { person: r.person ? r.person.id : '' });
+    const f = MODAL && MODAL.form; if (!f) return;
+    setField(f, 'date', r.date); if (r.item) setField(f, 'itemId', r.item.id); unitSync(f); setField(f, 'qtyU', r.qtyU); setField(f, 'qty', r.qtyIn || r.qtyN); setField(f, 'price', r.priceIn || r.price);
+    applyPerson(f, r); setField(f, 'pay', r.pay); if (r.pay === 'nisye') setField(f, 'paidNow', r.paid);
+    voiceBanner(f, raw, !r.item ? 'Məhsulu tapa bilmədim — seçin.' : !(r.priceIn || r.price) ? 'Qiyməti tapa bilmədim — yazın.' : '');
+  } else if (r.kind === 'buy') {
+    stockInForm(r.item ? r.item.module : '');
+    const f = MODAL && MODAL.form; if (!f) return;
+    setField(f, 'date', r.date); if (r.item) setField(f, 'itemId', r.item.id); unitSync(f); setField(f, 'qtyU', r.qtyU); setField(f, 'qty', r.qtyIn || r.qtyN);
+    if (r.total) setField(f, 'amount', r.total); applyPerson(f, r); setField(f, 'pay', r.pay); if (r.pay === 'nisye') setField(f, 'paidNow', r.paid);
+    voiceBanner(f, raw, !r.item ? 'Malı tapa bilmədim — seçin.' : '');
+  } else if (r.kind === 'expense') {
+    expenseForm(null, {});
+    const f = MODAL && MODAL.form; if (!f) return;
+    setField(f, 'date', r.date); setField(f, 'amount', r.amount); setField(f, 'cat', r.cat); setField(f, 'note', raw); applyPerson(f, r);
+    voiceBanner(f, raw, !r.amount ? 'Məbləği tapa bilmədim — yazın.' : '');
+  } else if (r.kind === 'recv' || r.kind === 'payout') {
+    const T = personTotals(r.person.id);
+    if (r.kind === 'recv' && T.owesUs <= 0.004) return openModal('Borc yoxdur', `<p style="margin:0">${esc(r.person.name)} sizə nisyə borclu deyil.</p>`, null);
+    if (r.kind === 'payout' && T.weOwe <= 0.004) return openModal('Borc yoxdur', `<p style="margin:0">Sizin ${esc(r.person.name)}-ə nisyə borcunuz yoxdur.</p>`, null);
+    fifoPayForm(r.person, r.kind === 'recv' ? 'recv' : 'out');
+    const f = MODAL && MODAL.form; if (!f) return;
+    setField(f, 'date', r.date); if (r.amount) setField(f, 'amount', r.amount); voiceBanner(f, raw, '');
+  }
+  if (draftId && MODAL) VOICE_DRAFT = draftId;
+}
+const VOICE_EXAMPLES = `<ul class="vex">
+  <li>«Əli Məmmədova 2 ton buğda satdım, tonu 450 manatdan, 300 manat verdi»</li>
+  <li>«Vəliyə 5 ton arpa nisyə satdım 380-dən»</li>
+  <li>«Həsəndən 1 ton gübrə aldım 900 manata»</li>
+  <li>«Dizel yanacağına 200 manat xərc»</li>
+  <li>«Kamal 500 manat borcunu ödədi»</li></ul>`;
+let REC = null;
+const isPhone = () => location.protocol.startsWith('http') && window.matchMedia('(max-width: 860px)').matches && (('ontouchstart' in window) || navigator.maxTouchPoints > 0);
+function draftSummary(raw) {
+  const r = parseCommand(raw), P = r.person ? r.person.name : r.newName;
+  if (r.kind === 'sale') return `🛒 Satış${P ? ' · ' + P : ''} · ${r.item ? r.item.name : '?'} ${r.qtyIn ? fmtN(r.qtyIn) + ' ' + ulabel(r.qtyU) : '?'}${r.priceIn ? ' × ' + fmt(r.priceIn) : ''}${r.total ? ' = ' + fmt(r.total) : ''}${r.pay === 'nisye' ? ' · Nisyə' + (r.paid ? ' (' + fmt(r.paid) + ' alındı)' : '') : ''}`;
+  if (r.kind === 'buy') return `📥 Alış${P ? ' · ' + P : ''} · ${r.item ? r.item.name : '?'} ${r.qtyIn ? fmtN(r.qtyIn) + ' ' + ulabel(r.qtyU) : '?'}${r.total ? ' · ' + fmt(r.total) : ''}`;
+  if (r.kind === 'expense') return `💸 Xərc · ${r.cat} · ${r.amount ? fmt(r.amount) : '?'}`;
+  if (r.kind === 'recv') return `💵 Ödəniş alındı · ${P} · ${fmt(r.amount)}`;
+  if (r.kind === 'payout') return `💸 Ödəniş etdik · ${P} · ${fmt(r.amount)}`;
+  return '❓ Başa düşülmədi — açıb yoxlayın';
+}
+function saveDraft(raw) { DB.drafts = DB.drafts || []; DB.drafts.push({ id: uid(), date: todayStr(), at: new Date().toISOString(), raw }); save(); }
+function beep() { try { navigator.vibrate && navigator.vibrate([120, 60, 120]); const C = window.AudioContext || window.webkitAudioContext; const c = new C(), o = c.createOscillator(), g = c.createGain(); o.frequency.value = 880; g.gain.value = 0.15; o.connect(g); g.connect(c.destination); o.start(); setTimeout(() => { o.frequency.value = 1320; }, 120); setTimeout(() => { o.stop(); c.close(); }, 260); } catch (e) {} }
+A.voice = () => {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  openModal('🎤 Səsli qeyd', `<div class="voice">
+    <button type="button" class="vmic" id="vmic" data-a="voiceToggle" aria-label="Danış">🎤</button>
+    <div class="vst" id="vst">${SR ? 'Danışın… Susanda özü yazacaq.' : 'Bu telefonda səs tanıma yoxdur. Klaviaturadakı 🎤 ilə deyin və ya yazın.'}</div>
+    <div class="vout" id="vout"></div>
+    <textarea name="vtext" id="vtext" rows="2" placeholder="Deyilən burada görünəcək" ${SR ? 'style="display:none"' : ''}></textarea>
+    <details><summary>Nümunələr</summary>${VOICE_EXAMPLES}</details></div>`, d => {
+    const txt = String(d.vtext || '').trim(); if (!txt) return 'Deyin və ya yazın.';
+    stopRec(); saveDraft(txt); beep(); toast('Səsli qeyd saxlandı'); return false;
+  }, { saveLabel: 'Saxla', okMsg: '' });
+  if (SR) startRec(SR);
+};
+function stopRec() { try { if (REC) REC.stop(); } catch (e) {} REC = null; const b = document.getElementById('vmic'); if (b) b.classList.remove('on'); }
+function startRec(SR) {
+  stopRec();
+  const rec = new SR(); REC = rec;
+  rec.lang = 'az-AZ'; rec.interimResults = true; rec.continuous = false; rec.maxAlternatives = 1;
+  const ta = document.getElementById('vtext'), st = document.getElementById('vst'), b = document.getElementById('vmic');
+  const base = ta ? ta.value.trim() : '';
+  let finalT = '';
+  rec.onresult = e => { let interim = ''; for (let i = e.resultIndex; i < e.results.length; i++) { const x = e.results[i][0].transcript; if (e.results[i].isFinal) finalT += x + ' '; else interim += x; } if (ta) ta.value = (base ? base + ' ' : '') + (finalT + interim).trim(); };
+  rec.onerror = e => { if (st) st.textContent = e.error === 'not-allowed' ? 'Mikrofona icazə verilmədi. Brauzer ayarlarından icazə verin və ya yazın.' : e.error === 'language-not-supported' ? 'Bu cihazda Azərbaycan dilində səs tanıma yoxdur. Klaviaturadakı 🎤 ilə deyin və ya yazın.' : e.error === 'network' ? 'Səs tanıma üçün internet lazımdır.' : e.error === 'no-speech' ? 'Səs eşidilmədi. 🎤 basıb yenidən deyin.' : 'Səs tanıma alınmadı. Yazın və ya yenidən cəhd edin.'; };
+  rec.onend = () => {
+    if (b) b.classList.remove('on'); if (REC === rec) REC = null;
+    const txt = (ta ? ta.value : finalT).trim();
+    if (txt && document.getElementById('vmic')) {
+      saveDraft(txt); beep(); if (ta) ta.value = '';
+      const vo = document.getElementById('vout'); if (vo) vo.innerHTML = `<b>✅ Yazıldı:</b> ${esc(draftSummary(txt))}<div class="hint">«${esc(txt)}»</div>`;
+      if (st) st.textContent = 'Yenə demək üçün 🎤 basın. Hamısını sonra «Səsli qeydlər»dən təsdiqləyəcəksiniz.';
+    } else if (st && /Danışın/.test(st.textContent)) st.textContent = 'Səs eşidilmədi. 🎤 basıb yenidən deyin.';
+  };
+  try { rec.start(); if (b) b.classList.add('on'); } catch (e) { if (st) st.textContent = 'Səs tanıma başlamadı. Yazın.'; }
+}
+A.voiceToggle = () => { const SR = window.SpeechRecognition || window.webkitSpeechRecognition; if (!SR) return; if (REC) { try { REC.stop(); } catch (e) {} } else { const st = document.getElementById('vst'); if (st) st.textContent = 'Danışın… Susanda özü yazacaq.'; const vo = document.getElementById('vout'); if (vo) vo.innerHTML = ''; startRec(SR); } };
+function pageDrafts() {
+  const L = (DB.drafts || []).slice().reverse();
+  return { title: 'Səsli qeydlər', sub: 'Yolda dediklərinizi burada yoxlayıb təsdiqləyin', navId: 'drafts',
+    actions: isPhone() ? `<button type="button" class="btn pri" data-a="voice">🎤 Yeni səsli qeyd</button>` : '',
+    body: L.length ? `<div class="drafts">${L.map(d => `<div class="card pad dcard"><div class="dsum">${esc(draftSummary(d.raw))}</div><div class="hint">«${esc(d.raw)}» · ${fmtD(d.date)} ${esc((d.at || '').slice(11, 16))}</div>
+      <div class="row" style="gap:8px;margin-top:10px"><button type="button" class="btn pri" data-a="draftOpen" data-id="${d.id}">✔ Aç və təsdiqlə</button><button type="button" class="btn" data-a="draftDel" data-id="${d.id}">Sil</button></div></div>`).join('')}</div>`
+      : '<div class="card"><div class="empty">Təsdiq gözləyən səsli qeyd yoxdur</div></div>' };
+}
+A.draftOpen = ds => { const d = (DB.drafts || []).find(x => x.id === ds.id); if (d) runCommand(d.raw, d.id); };
+A.draftDel = ds => confirmBox('Bu səsli qeyd silinsin?', () => { DB.drafts = DB.drafts.filter(x => x.id !== ds.id); });
+
+/* ---------- 📏 Ölçü vahidləri və çevirmə ---------- */
+const UMASS = { t: 1000, kq: 1, sentner: 100, q: 0.001 }, UVOL = { l: 1, ml: 0.001, m3: 1000 };
+const ULABEL = { t: 'ton', kq: 'kq', sentner: 'sentner', q: 'qram', l: 'litr', ml: 'ml', m3: 'm³' };
+function ukey(u) {
+  const x = VN(u).replace(/\.$/, '');
+  if (/^(t|ton|tonn|tn)$/.test(x)) return 't'; if (/^(kq|kg|kilo|kiloqram)$/.test(x)) return 'kq'; if (/^(sentner|s)$/.test(x)) return 'sentner'; if (/^(q|qr|qram)$/.test(x)) return 'q';
+  if (/^(l|lt|litr)$/.test(x)) return 'l'; if (/^ml$/.test(x)) return 'ml'; if (/^(m3|m³|kub)$/.test(x)) return 'm3';
+  return x || '';
+}
+const ufam = k => UMASS[k] ? UMASS : UVOL[k] ? UVOL : null;
+function unitChoices(base) { const k = ukey(base); if (UMASS[k]) return ['t', 'kq', 'sentner']; if (UVOL[k]) return ['l']; return [k || base]; }
+function toBase(v, u, base) { const b = ukey(base), k = ukey(u), f = ufam(b); if (!f || !f[k] || k === b) return num(v); return num(v) * f[k] / f[b]; }
+const ulabel = u => ULABEL[ukey(u)] || u || '';
+function qtyBox(name, val, unit) {
+  return `<div class="qrow">${numInp(name, val)}<select name="${name}U" data-qunit="${name}" class="usel">${unit ? `<option value="${esc(unit)}">${esc(ulabel(unit))}</option>` : ''}</select></div><div class="hint qconv" id="${name}Conv"></div>`;
+}
+function unitSync(form) {
+  form.querySelectorAll('select[data-qunit]').forEach(us => {
+    const name = us.dataset.qunit, itSel = form.querySelector('[name=itemId]'), it = itSel && item(itSel.value);
+    const base = it ? it.unit : '', ch = unitChoices(base), cur = ukey(us.value);
+    const want = ch.map(k => `${k}`).join('|');
+    if (us.dataset.opts !== want) { us.innerHTML = ch.map(k => `<option value="${k}">${esc(ulabel(k))}</option>`).join(''); us.value = ch.includes(cur) ? cur : ch[0] === ukey(base) ? ch[0] : (ch.includes(ukey(base)) ? ukey(base) : ch[0]); us.dataset.opts = want; }
+    us.style.display = ch.length > 1 ? '' : 'none';
+    const v = num(fv(form, name)), out = form.querySelector('#' + name + 'Conv');
+    if (out) out.textContent = it && v > 0 && ukey(us.value) !== ukey(base) ? `= ${fmtN(r2(toBase(v, us.value, base) * 1000) / 1000)} ${ulabel(base)} (anbarda belə görünəcək)` : '';
+    const pl = form.querySelector('[data-plabel]'); if (pl) pl.textContent = `Qiymət (1 ${ulabel(us.value || base) || 'vahid'}), ₼`;
+  });
+}
+// formu yadda saxlamazdan əvvəl miqdarı və qiyməti malın əsas vahidinə çevirir
+function unitNormalize(form, data) {
+  const us = form.querySelector('select[data-qunit]'); if (!us) return;
+  const it = item(data.itemId); if (!it) return;
+  const name = us.dataset.qunit, u = ukey(data[name + 'U'] || it.unit), b = ukey(it.unit);
+  data.qtyIn = data[name]; data.qtyUnit = u;
+  if (u === b || !ufam(b) || !ufam(b)[u]) { data.qtyUnit = b; return; }
+  const qb = toBase(data[name], u, it.unit); data[name] = String(qb);
+  if (data.price !== undefined && data.price !== '') { data.priceIn = data.price; data.price = String(num(data.price) * num(data.qtyIn) / (qb || 1)); }
+}
+// satışın göstərilməsi: necə yazılıbsa elə
+const saleQtyTxt = s => s.inUnit && s.inQty ? fmtQ(s.inQty, ulabel(s.inUnit)) : fmtQ(s.qty, ulabel(itemUnit(s.itemId)));
+const salePriceTxt = s => s.inUnit && s.inPrice ? fmt(s.inPrice) + '/' + ulabel(s.inUnit) : fmt(s.price);
+
 /* ---------- 📱 Telefon: aşağı menyu və quraşdırma ---------- */
 const BOTTOM = [['home', 'home', 'Ana səhifə'], ['sales', 'cart', 'Satış'], ['expenses', 'wallet', 'Xərc'], ['persons', 'person', 'Şəxslər']];
 function bottomBar(pg) {
@@ -577,7 +864,7 @@ function bottomBar(pg) {
     <button type="button" class="${inBar ? '' : 'on'}" data-a="moreMenu">${sv(ICON.more, 22)}<span>Digər</span></button></nav>`;
 }
 A.moreMenu = () => {
-  const items = PAGES_META.filter(p => !BOTTOM.some(b => b[0] === p.id));
+  const items = PAGES_META.filter(p => !BOTTOM.some(b => b[0] === p.id)).concat([{ id: 'drafts', name: 'Səsli qeydlər' + ((DB.drafts || []).length ? ' (' + DB.drafts.length + ')' : ''), icon: 'doc', color: '#2C6E3F' }]);
   openModal('Bölmələr', `<div class="more-grid">${items.map(p => `<button type="button" data-a="go" data-p="${p.id}"><span class="ic" style="background:${p.color}">${sv(ICON[p.icon] || ICON.home, 24).replace('currentColor', '#fff')}</span><span>${esc(p.name)}</span></button>`).join('')}</div>`, null);
 };
 const isStandalone = () => (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
@@ -623,6 +910,7 @@ function pageHome() {
   lowStockItems().forEach(i => alerts.push(`<b>Az qalıb:</b> ${esc(i.name)} – ${fmtQ(stockQty(i.id), i.unit)}`));
   const rec = sum(receivables(), saleDebt); if (rec > 0) alerts.push(`<b>Sizə borclar:</b> ${fmt(rec)} nisyə satışdan alınmayıb`);
   const pay = payablesTotal(); if (pay > 0) alerts.push(`<b>Sizin borclarınız:</b> ${fmt(pay)} (işçi, icarə, təchizatçı)`);
+  if ((DB.drafts || []).length) alerts.push(`<b>🎤 ${DB.drafts.length} səsli qeyd</b> təsdiq gözləyir. <a href="#" data-a="go" data-p="drafts">Bax ›</a>`);
   if (cloudReady() && !cloudOn()) alerts.push(`<b>Telefonla birlikdə işlətmək üçün:</b> bulud hesabı açın. <a href="#" data-a="cloudConnect">Hesab aç / qoş ›</a>`);
   const ba = cloudOn() ? '' : backupAlert(); if (ba) alerts.push(ba);
   const tiles = PAGES_META.filter(p => p.id !== 'home').map(p => `<button type="button" class="tile" data-a="go" data-p="${p.id}"><div class="ic" style="background:${p.color}">${sv(ICON[p.icon], 30).replace('currentColor', '#fff')}</div><span>${p.name}</span></button>`).join('');
@@ -746,7 +1034,7 @@ function harvestForm(h, preField) {
     ${F('Tarix', 'date', inp('date', h.date, 'date'))}
     ${F('Sahə', 'fieldId', sel('fieldId', fieldOpts(h.fieldId, '— seçin —')))}
     ${F('Məhsul', 'itemId', sel('itemId', itemOpts(h.itemId || (f0 && f0.crop), i => i.module === 'taxil' || i.module === 'findiq', '— seçin —')))}
-    ${F('Miqdar', 'qty', numInp('qty', h.qty), '', 'Malın vahidi ilə (məs. ton)')}
+    ${F('Miqdar', 'qty', qtyBox('qty', h.qty))}
     ${F('Hara getdi', 'dest', sel('dest', opts([{ v: 'anbar', t: 'Anbara (qalığa əlavə olunur)' }, { v: 'sahe', t: 'Sahədə qaldı / sahədən satılacaq' }], h.dest)), 'full')}
     ${F('Qeyd', 'note', inp('note', h.note), 'full')}
   </div>`, d => {
@@ -815,7 +1103,7 @@ function stockInForm(preModule) {
   openModal('Anbara giriş', `<div class="form">
     ${F('Tarix', 'date', inp('date', todayStr(), 'date'))}
     ${F('Mal', 'itemId', sel('itemId', itemOpts('', preModule ? i => i.module === preModule : null, '— seçin —')))}
-    ${F('Miqdar', 'qty', numInp('qty', ''))}
+    ${F('Miqdar', 'qty', qtyBox('qty', ''))}
     ${F('Ödənilən pul, ₼ (alışdırsa)', 'amount', numInp('amount', ''), '', 'Pul ödənibsə yazın, avtomatik xərc kimi yazılacaq')}
     <div id="costBox" class="full form" style="padding:0">
       ${F('Xərc kateqoriyası', 'cat', sel('cat', catOpts('Mal alışı')))}
@@ -832,7 +1120,7 @@ function stockInForm(preModule) {
     const P = num(d.amount) > 0 ? resolvePerson(d) : { id: '', name: '' }; if (typeof P === 'string') return P;
     const id = uid(), it = item(d.itemId);
     DB.moves.push({ id, date: d.date || todayStr(), itemId: d.itemId, qty: num(d.qty), type: 'in', note: d.note.trim() });
-    if (num(d.amount) > 0) DB.expenses.push({ id: uid(), date: d.date || todayStr(), cat: d.cat, amount: num(d.amount), fieldId: d.fieldId, module: it.module === 'material' ? 'taxil' : it.module, note: `${it.name} ${fmtQ(d.qty, it.unit)} alış${d.note ? ' · ' + d.note.trim() : ''}`, moveRef: id, personId: P.id, pay: d.pay, paidNow: d.pay === 'nisye' ? num(d.paidNow) : 0 });
+    if (num(d.amount) > 0) DB.expenses.push({ id: uid(), date: d.date || todayStr(), cat: d.cat, amount: num(d.amount), fieldId: d.fieldId, module: it.module === 'material' ? 'taxil' : it.module, note: `${it.name} ${fmtQ(d.qtyIn || d.qty, ulabel(d.qtyUnit || it.unit))} alış${d.note ? ' · ' + d.note.trim() : ''}`, moveRef: id, personId: P.id, pay: d.pay, paidNow: d.pay === 'nisye' ? num(d.paidNow) : 0 });
     if (num(d.amount) > 0 && d.pay === 'nisye' && num(d.paidNow) > 0) DB.ppays.push({ id: uid(), expId: DB.expenses[DB.expenses.length - 1].id, date: d.date || todayStr(), amount: num(d.paidNow), initial: true });
   }, { onInput: form => { show(form, 'costBox', num(fv(form, 'amount')) > 0); show(form, 'paidBox', fv(form, 'pay') === 'nisye'); show(form, 'newPBox', fv(form, 'personId') === '__new'); } });
 }
@@ -840,7 +1128,7 @@ function stockOutForm(preModule) {
   openModal('Anbardan çıxış', `<div class="form">
     ${F('Tarix', 'date', inp('date', todayStr(), 'date'))}
     ${F('Mal', 'itemId', sel('itemId', itemOpts('', preModule ? i => i.module === preModule : null, '— seçin —')))}
-    ${F('Miqdar', 'qty', numInp('qty', ''))}
+    ${F('Miqdar', 'qty', qtyBox('qty', ''))}
     ${F('Səbəb', 'reason', sel('reason', opts(['İstifadə', 'İtki / xarab olub', 'Digər'].map(x => ({ v: x, t: x })), 'İstifadə')))}
     ${F('Hansı sahədə istifadə olunub', 'fieldId', sel('fieldId', fieldOpts('', '— yoxdur —')), 'full')}
     ${F('Qeyd', 'note', inp('note', ''), 'full')}
@@ -1082,7 +1370,7 @@ function pageSales(mod) {
       <div class="card pad stat"><div class="l">Nisyə qalığı</div><div class="v neg">${fmt(debt)}</div></div></div>
     ${breakdown}
     <div class="card" style="margin-top:16px"><div class="card-h"><h3>Satışlar (${list.length})</h3></div>${list.length ? `<div class="tw"><table><thead><tr><th>Tarix</th><th>Məhsul</th><th>Haradan</th><th>Sahə</th><th>Alıcı</th><th class="n">Miqdar</th><th class="n">Qiymət</th><th class="n">Cəmi</th><th>Ödəniş</th><th></th></tr></thead><tbody>
-    ${list.map(s => { const debt = saleDebt(s); return `<tr><td>${fmtD(s.date)}</td><td>${esc(itemName(s.itemId))}</td><td>${s.from === 'anbar' ? 'Anbardan' : 'Sahədən'}</td><td>${s.fieldId ? esc(fieldName(s.fieldId)) : '—'}</td><td>${saleBuyer(s) ? `<a href="#" data-a="go" data-p="person" data-id="${s.personId}">${esc(saleBuyer(s))}</a>` : '—'}</td><td class="n">${fmtQ(s.qty, itemUnit(s.itemId))}</td><td class="n">${fmt(s.price)}</td><td class="n"><b>${fmt(s.total)}</b></td><td>${s.pay === 'nisye' ? (debt > 0 ? `<span class="tag debt">Nisyə · borc ${fmt(debt)}</span>` : '<span class="tag paid">Nisyə · ödənib</span>') : PAYTYPES[s.pay]}</td>${rowActs('sale', s.id)}</tr>`; }).join('')}
+    ${list.map(s => { const debt = saleDebt(s); return `<tr><td>${fmtD(s.date)}</td><td>${esc(itemName(s.itemId))}</td><td>${s.from === 'anbar' ? 'Anbardan' : 'Sahədən'}</td><td>${s.fieldId ? esc(fieldName(s.fieldId)) : '—'}</td><td>${saleBuyer(s) ? `<a href="#" data-a="go" data-p="person" data-id="${s.personId}">${esc(saleBuyer(s))}</a>` : '—'}</td><td class="n">${saleQtyTxt(s)}</td><td class="n">${salePriceTxt(s)}</td><td class="n"><b>${fmt(s.total)}</b></td><td>${s.pay === 'nisye' ? (debt > 0 ? `<span class="tag debt">Nisyə · borc ${fmt(debt)}</span>` : '<span class="tag paid">Nisyə · ödənib</span>') : PAYTYPES[s.pay]}</td>${rowActs('sale', s.id)}</tr>`; }).join('')}
     </tbody><tfoot><tr><td colspan="7">Cəmi</td><td class="n">${fmt(total)}</td><td colspan="2"></td></tr></tfoot></table></div>` : '<div class="empty">Seçilən süzgəcə uyğun satış yoxdur</div>'}</div>
     <div class="card" style="margin-top:16px"><div class="card-h"><h3>Digər gəlirlər · ${esc(label)}</h3><button type="button" class="btn sm no-print" data-a="newIncome" data-module="${mod || ''}">+ Digər gəlir</button></div>${inc.length ? `<div class="tw"><table><thead><tr><th>Tarix</th><th>Növ</th><th>Bölmə</th><th>Sahə</th><th>Qeyd</th><th class="n">Məbləğ</th><th></th></tr></thead><tbody>
     ${inc.map(i => `<tr><td>${fmtD(i.date)}</td><td>${esc(i.cat)}</td><td>${modName(i.module)}</td><td>${esc(fieldName(i.fieldId))}</td><td>${esc(i.note)}</td><td class="n"><b>${fmt(i.amount)}</b></td>${rowActs('income', i.id)}</tr>`).join('')}
@@ -1101,8 +1389,8 @@ function saleForm(s, pre) {
     ${F('Məhsul', 'itemId', sel('itemId', itemOpts(s.itemId || (f0 && f0.crop) || '', filter, '— seçin —')))}
     ${F('Haradan', 'from', sel('from', opts([{ v: 'anbar', t: 'Anbardan (qalıq azalır)' }, { v: 'sahe', t: 'Birbaşa sahədən' }], s.from)))}
     ${F('Sahə', 'fieldId', sel('fieldId', fieldOpts(s.fieldId, '— yoxdur —')), '', '<span id="fieldHint">Hansı sahənin məhsuludur (hesabat üçün)</span>')}
-    ${F('Miqdar', 'qty', numInp('qty', s.qty))}
-    ${F('Qiymət (1 vahid), ₼', 'price', numInp('price', s.price))}
+    ${F('Miqdar', 'qty', qtyBox('qty', s.inQty || s.qty, s.inUnit || ''))}
+    <div class="fld"><label for="f_price" data-plabel>Qiymət (1 vahid), ₼</label>${numInp('price', s.inPrice || s.price)}</div>
     ${personPicker('Alıcı (kimə satılır)', s.personId || pre.person || '', '— alıcı yazılmayıb —')}
     ${F('Ödəniş', 'pay', sel('pay', opts(Object.entries(PAYTYPES).map(([v, t]) => ({ v, t })), s.pay)))}
     <div id="paidBox" class="full">${F('İndi ödənən hissə, ₼ (nisyədə)', 'paidNow', numInp('paidNow', s.paidNow))}</div>
@@ -1124,7 +1412,7 @@ function saleForm(s, pre) {
     const id = s.id || uid();
     const oldPays = s.id ? DB.spays.filter(p => p.saleId === id && !p.initial) : [];
     removeSale(id);
-    DB.sales.push({ id, date: d.date || todayStr(), itemId: d.itemId, from: d.from, fieldId: d.fieldId, qty: num(d.qty), price: num(d.price), total, buyer: P.name, personId: P.id, pay: d.pay, paidNow: d.pay === 'nisye' ? num(d.paidNow) : 0, note: d.note.trim() });
+    DB.sales.push({ id, date: d.date || todayStr(), itemId: d.itemId, from: d.from, fieldId: d.fieldId, qty: num(d.qty), price: num(d.price), total, inQty: d.qtyUnit && d.qtyUnit !== ukey(itemUnit(d.itemId)) ? num(d.qtyIn) : 0, inUnit: d.qtyUnit && d.qtyUnit !== ukey(itemUnit(d.itemId)) ? d.qtyUnit : '', inPrice: d.qtyUnit && d.qtyUnit !== ukey(itemUnit(d.itemId)) ? num(d.priceIn) : 0, buyer: P.name, personId: P.id, pay: d.pay, paidNow: d.pay === 'nisye' ? num(d.paidNow) : 0, note: d.note.trim() });
     if (d.from === 'anbar') DB.moves.push({ id: uid(), date: d.date || todayStr(), itemId: d.itemId, qty: -num(d.qty), type: 'sale', ref: id, note: 'Satış' + (P.name ? ' · ' + P.name : '') });
     if (d.pay === 'nisye' && num(d.paidNow) > 0) DB.spays.push({ id: uid(), saleId: id, date: d.date || todayStr(), amount: num(d.paidNow), initial: true });
     if (d.pay === 'nisye') oldPays.forEach(p => DB.spays.push(p));
@@ -1226,7 +1514,7 @@ function pageDebts() {
       <div class="card pad stat"><div class="l">Sizin borclarınız</div><div class="v neg">${fmt(payablesTotal())}</div></div></div>
     <div class="card" style="margin-top:16px"><div class="card-h"><h3>Sizə borclu olanlar</h3></div>
       ${rec.length ? `<div class="tw"><table><thead><tr><th>Tarix</th><th>Alıcı</th><th>Məhsul</th><th class="n">Cəmi</th><th class="n">Ödənib</th><th class="n">Borc</th><th></th></tr></thead><tbody>
-      ${rec.map(s => `<tr><td>${fmtD(s.date)}</td><td><a href="#" data-a="go" data-p="person" data-id="${s.personId}"><b>${esc(saleBuyer(s))}</b></a></td><td>${esc(itemName(s.itemId))} ${fmtQ(s.qty, itemUnit(s.itemId))}</td><td class="n">${fmt(s.total)}</td><td class="n">${fmt(salePaid(s))}</td><td class="n neg"><b>${fmt(saleDebt(s))}</b></td><td class="acts no-print"><button type="button" class="btn sm pri" data-a="newSPay" data-id="${s.id}">Ödəniş al</button></td></tr>`).join('')}
+      ${rec.map(s => `<tr><td>${fmtD(s.date)}</td><td><a href="#" data-a="go" data-p="person" data-id="${s.personId}"><b>${esc(saleBuyer(s))}</b></a></td><td>${esc(itemName(s.itemId))} ${saleQtyTxt(s)}</td><td class="n">${fmt(s.total)}</td><td class="n">${fmt(salePaid(s))}</td><td class="n neg"><b>${fmt(saleDebt(s))}</b></td><td class="acts no-print"><button type="button" class="btn sm pri" data-a="newSPay" data-id="${s.id}">Ödəniş al</button></td></tr>`).join('')}
       </tbody></table></div>` : '<div class="empty">Nisyə borc yoxdur</div>'}</div>
     <div class="card" style="margin-top:16px"><div class="card-h"><h3>Sizin borclarınız</h3></div>
       ${ws.length || rents.length ? `<div class="tw"><table><thead><tr><th>Kimə</th><th>Səbəb</th><th class="n">Borc</th><th></th></tr></thead><tbody>
@@ -1360,6 +1648,30 @@ function listEditor(key, title, hint) {
     <form class="row" data-addlist="${key}"><input name="v" aria-label="${title}: yeni" placeholder="${hint}" style="height:40px;border:1px solid #CFCABB;border-radius:10px;padding:0 10px;flex:1;min-width:160px"><button class="btn sm pri" type="submit">Əlavə et</button></form>
   </div></div>`;
 }
+/* köhnə qeydlər: tonla yazılıb, amma əslində kiloqram olanlar */
+function unitSuspects() {
+  const L = [];
+  DB.sales.forEach(s => { const it = item(s.itemId); if (!it || ukey(it.unit) !== 't' || s.inUnit) return; if (num(s.price) > 0 && num(s.price) < 20) L.push({ k: 'sale', id: s.id, date: s.date, txt: `Satış: ${it.name} ${fmtN(s.qty)} t × ${fmt(s.price)} (${saleBuyer(s) || '—'})`, fix: `${fmtN(s.qty)} kq × ${fmt(s.price)}/kq = ${fmt(s.total)}`, on: true }); });
+  DB.moves.forEach(m => { const it = item(m.itemId); if (!it || ukey(it.unit) !== 't' || m.unitFixed) return; if ((m.type === 'in' || m.type === 'harvest' || m.type === 'out') && Math.abs(num(m.qty)) >= 100) L.push({ k: 'move', id: m.id, date: m.date, txt: `${m.type === 'harvest' ? 'Yığım' : m.type === 'in' ? 'Anbara giriş' : 'Anbardan çıxış'}: ${it.name} ${fmtN(Math.abs(num(m.qty)))} t`, fix: `${fmtN(Math.abs(num(m.qty)))} kq = ${fmtN(r2(Math.abs(num(m.qty)) / 1000))} t`, on: false }); });
+  return L.sort((a, b) => a.date.localeCompare(b.date));
+}
+function unitFixCard() {
+  const L = unitSuspects(); if (!L.length) return '';
+  return `<div class="card" style="margin-bottom:16px"><div class="card-h"><h3>📏 Vahid yoxlaması (${L.length})</h3></div><div class="pad">
+    <p style="margin:0 0 10px;line-height:1.5">Bu qeydlər <b>ton</b> kimi saxlanıb, amma rəqəmlərə görə <b>kiloqramla</b> yazılmış ola bilər. Kiloqram olanları işarələyin və düzəldin. Məbləğlər dəyişmir, ancaq anbar qalığı düzəlir.</p>
+    <div class="ufix">${L.map(x => `<label class="chk ufrow"><input type="checkbox" data-uf="${x.k}:${x.id}" ${x.on ? 'checked' : ''}><span><b>${fmtD(x.date)}</b> · ${esc(x.txt)}<br><span class="hint">Düzəldiləndə: ${esc(x.fix)}</span></span></label>`).join('')}</div>
+    <div class="row" style="margin-top:12px"><button type="button" class="btn pri" data-a="unitFix">Seçilənləri kiloqram kimi düzəlt</button></div></div></div>`;
+}
+A.unitFix = () => {
+  const sel = [...document.querySelectorAll('[data-uf]')].filter(c => c.checked).map(c => c.dataset.uf.split(':'));
+  if (!sel.length) return toast('Heç nə seçilməyib');
+  confirmBox(`${sel.length} qeyd kiloqram kimi düzəldilsin? (1 000 kq = 1 t)`, () => {
+    sel.forEach(([k, id]) => {
+      if (k === 'sale') { const s = byId('sales', id); if (!s) return; s.inQty = num(s.qty); s.inUnit = 'kq'; s.inPrice = num(s.price); s.qty = r2(num(s.qty) / 1000 * 1e6) / 1e6; s.price = r2(num(s.total) / (s.qty || 1)); DB.moves.forEach(m => { if (m.ref === id) { m.qty = -s.qty; m.unitFixed = true; } }); }
+      if (k === 'move') { const m = byId('moves', id); if (!m) return; m.qty = num(m.qty) / 1000; m.unitFixed = true; if (m.type === 'harvest' && m.ref) { const h = byId('harvests', m.ref); if (h) h.qty = num(h.qty) / 1000; } }
+    });
+  }, 'Bəli, düzəlt');
+};
 function cloudSettingsCard() {
   if (!cloudReady()) return '';
   const c = cloudInfo();
@@ -1378,7 +1690,7 @@ function pageSettings() {
   const lb = DB.lastBackup ? fmtD(DB.lastBackup) : 'heç vaxt';
   return {
     title: 'Ayarlar', sub: '',
-    body: `${cloudSettingsCard()}<div class="grid g2">
+    body: `${unitFixCard()}${cloudSettingsCard()}<div class="grid g2">
       <div class="card"><div class="card-h"><h3>Ehtiyat nüsxə</h3></div><div class="pad" style="display:flex;flex-direction:column;gap:12px">
         <div style="line-height:1.5">Məlumatlar yalnız bu kompüterin brauzerində saxlanır. Brauzer təmizlənsə və ya kompüter xarab olsa, itə bilər. <b>Həftədə bir dəfə ehtiyat nüsxə yükləyin</b> və fləşkada və ya telefonda saxlayın.</div>
         <div class="kv"><span>Son ehtiyat nüsxə</span><b>${lb}</b></div>
@@ -1479,7 +1791,7 @@ function personLedger(pid) {
   DB.sales.filter(s => s.personId === pid).forEach(s => {
     const t = num(s.total);
     const atSale = s.pay === 'nisye' ? sum(DB.spays.filter(p => p.saleId === s.id && p.initial), p => num(p.amount)) : t;
-    ev.push({ date: s.date, seq: seq(s.id), kind: 'sale', desc: `${itemName(s.itemId)} ${fmtQ(s.qty, itemUnit(s.itemId))} × ${fmt(s.price)}${s.note ? ' · ' + s.note : ''}`, tag: PAYTYPES[s.pay], sale: t, recv: r2(atSale), buy: 0, paid: 0, left: r2(t - atSale) });
+    ev.push({ date: s.date, seq: seq(s.id), kind: 'sale', desc: `${itemName(s.itemId)} ${saleQtyTxt(s)} × ${salePriceTxt(s)}${s.note ? ' · ' + s.note : ''}`, tag: PAYTYPES[s.pay], sale: t, recv: r2(atSale), buy: 0, paid: 0, left: r2(t - atSale) });
   });
   DB.spays.forEach(p => { if (p.initial) return; const s = byId('sales', p.saleId); if (!s || s.personId !== pid) return; ev.push({ date: p.date, seq: seq(p.id), kind: 'recv', desc: 'Ödəniş alındı' + (p.note ? ' · ' + p.note : ''), sale: 0, recv: num(p.amount), buy: 0, paid: 0, left: null }); });
   DB.expenses.filter(e => e.personId === pid).forEach(e => {
@@ -1820,7 +2132,7 @@ async function cloudLogout() {
 /* ---------- marşrut və başlanğıc ---------- */
 const ROUTES = {
   home: pageHome, fields: pageFields, field: pageField, harvest: pageHarvest, stock: pageStock, machines: pageMachines, workers: pageWorkers,
-  sales: () => pageSales(), expenses: () => pageExpenses(), debts: pageDebts, persons: pagePersons, person: pagePerson, reports: pageReports, settings: pageSettings,
+  sales: () => pageSales(), expenses: () => pageExpenses(), debts: pageDebts, drafts: pageDrafts, persons: pagePersons, person: pagePerson, reports: pageReports, settings: pageSettings,
   mod_ferma: () => pageModule('ferma'), mod_findiq: () => pageModule('findiq'), mod_derman: () => pageModule('derman')
 };
 function authed() { if (cloudOn()) return true; return DB.auth && sessionStorage.getItem(SESSION_KEY) === DB.auth.hash.slice(0, 16); }
